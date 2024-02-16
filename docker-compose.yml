@@ -2,7 +2,7 @@ version: "3.5"
 
 services:
   app:
-    image: ghcr.io/thueske/cloudflare-caddy:latest
+    image: ghcr.io/hueske-digital/caddy:latest
     restart: unless-stopped
     ports:
       - "80:80"
