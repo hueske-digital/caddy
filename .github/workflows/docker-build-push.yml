@@ -36,3 +36,6 @@ jobs:
           push: true
           tags: ghcr.io/hueske-digital/caddy:latest
           platforms: linux/amd64,linux/arm64/v8
+
+      - name: Do not automatically disable workflow execution
+        uses: gautamkrishnar/keepalive-workflow@v1
