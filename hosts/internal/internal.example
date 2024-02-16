@@ -1,0 +1,15 @@
+# INTERNAL SERVICE #
+
+https://logs.hueske.services {
+
+    # import logging
+    import internal
+    import tls
+    import header
+
+    handle @internal {
+        reverse_proxy logs-app-1:8080
+    }
+    respond 403
+
+}

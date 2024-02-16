@@ -1,0 +1,5 @@
+.env
+.idea
+hosts/cloudflare/*.conf
+hosts/external/*.conf
+hosts/internal/*.conf

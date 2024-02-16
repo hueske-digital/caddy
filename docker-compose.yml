@@ -1,0 +1,40 @@
+version: "3.5"
+
+services:
+  app:
+    image: ghcr.io/thueske/cloudflare-caddy:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - $PWD/.env
+    entrypoint: /docker/entrypoint.sh
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - $PWD/Caddyfile:/etc/caddy/Caddyfile
+      - $PWD/bin:/docker
+      - app_hosts:/hosts
+      - app_data:/data
+      - app_conf:/config
+    networks:
+      proxy_apps:
+    dns:
+      - "1.1.1.1"
+      - "1.0.0.1"
+    labels:
+      backups: "true"
+
+volumes:
+  app_data:
+  app_conf:
+  app_hosts:
+    driver: local
+    driver_opts:
+      type: none
+      device: $PWD/hosts
+      o: bind
+
+networks:
+  proxy_apps:
+    name: proxy_apps

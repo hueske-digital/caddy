@@ -1,0 +1,24 @@
+# EXTERNAL SERVICE #
+
+https://analytics.hueske.services {
+
+    # import logging
+    import tls
+    import compression
+    import header
+
+    @disabled {
+        path /umami.js
+        header_regexp Cookie "disabled"
+    }
+    respond @disabled 404
+
+    @authenticated {
+        path /dashboard
+    }
+
+    reverse_proxy @authenticated analytics-app-1:3000 {
+        header_down Set-Cookie "disabled=; Max-Age=31536000; SameSite=None; Secure"
+    }
+    reverse_proxy analytics-app-1:3000
+}

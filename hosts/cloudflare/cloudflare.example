@@ -1,0 +1,16 @@
+# EXTERNAL SERVICE WITH CLOUDFLARE PROXY #
+
+https://monitoring.hueske.services {
+
+    # import logging
+    import cloudflare
+    import tls
+    import compression
+    import header
+    
+    handle @cloudflare {
+        reverse_proxy monitoring-app-1:3001
+    }
+    respond 403
+
+}
