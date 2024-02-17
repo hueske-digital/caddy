@@ -12,8 +12,6 @@ services:
     entrypoint: /docker/entrypoint.sh
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
-      - $PWD/Caddyfile:/etc/caddy/Caddyfile
-      - $PWD/bin:/docker
       - app_hosts:/hosts
       - app_data:/data
       - app_conf:/config
