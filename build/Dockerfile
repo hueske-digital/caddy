@@ -6,6 +6,6 @@ RUN xcaddy build \
 FROM caddy:2-alpine
 RUN apk add --update --no-cache inotify-tools
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
-COPY Caddyfile /etc/caddy/Caddyfile
-COPY build/bin/*.sh /docker/
+COPY ./Caddyfile /etc/caddy/Caddyfile
+COPY ./build/bin/*.sh /docker/
 RUN chmod +x /docker/*.sh
