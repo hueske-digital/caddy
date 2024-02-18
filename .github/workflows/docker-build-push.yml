@@ -34,6 +34,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: true
+          context: ./build
           tags: ghcr.io/hueske-digital/caddy:latest
           platforms: linux/amd64,linux/arm64
 
