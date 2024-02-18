@@ -1,4 +1,2 @@
-import /hosts/base.conf
-import /hosts/cloudflare/*.conf
-import /hosts/external/*.conf
-import /hosts/internal/*.conf
+import /hosts/_base.conf
+import /hosts/*.conf

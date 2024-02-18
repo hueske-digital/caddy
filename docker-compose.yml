@@ -13,7 +13,7 @@ services:
     entrypoint: /docker/entrypoint.sh
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
-      - app_hosts:/hosts
+      - $PWD/hosts:/hosts
       - app_data:/data
       - app_conf:/config
     networks:
@@ -22,12 +22,6 @@ services:
 volumes:
   app_data:
   app_conf:
-  app_hosts:
-    driver: local
-    driver_opts:
-      type: none
-      device: $PWD/hosts
-      o: bind
 
 networks:
   proxy_apps:
