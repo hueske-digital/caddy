@@ -18,9 +18,6 @@ services:
       - app_conf:/config
     networks:
       proxy_apps:
-    dns:
-      - "1.1.1.1"
-      - "1.0.0.1"
 
 volumes:
   app_data:
