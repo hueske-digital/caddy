@@ -1,4 +1,5 @@
 .env
 .idea
-hosts/*.conf
-!hosts/_base.conf
+hosts/cloudflare/*.conf
+hosts/external/*.conf
+hosts/internal/*.conf
