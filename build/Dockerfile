@@ -1,7 +1,6 @@
 FROM caddy:2-builder-alpine AS builder
 RUN xcaddy build \
-    --with github.com/caddy-dns/cloudflare \
-    --with github.com/caddyserver/replace-response
+    --with github.com/caddy-dns/cloudflare
 
 FROM caddy:2-alpine
 RUN apk add --update --no-cache inotify-tools
