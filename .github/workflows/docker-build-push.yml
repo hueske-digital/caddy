@@ -2,7 +2,6 @@ name: Build and Push Docker image
 
 env:
   CADDY_VERSION: 2.8
-  BASE_IMAGE: caddy:2.8-alpine
   OWN_IMAGE: ghcr.io/hueske-digital/caddy:latest
 
 on:
@@ -11,14 +10,7 @@ on:
       - main
 
   schedule:
-    - cron: '0 1 * * *'
-
-  workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Set to "true" to force rebuild and push the Docker image regardless of changes'
-        required: false
-        default: 'false'
+    - cron: '0 0 * * 1'
 
 jobs:
   build:
@@ -42,35 +34,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull Base Image for Comparison
-        run: docker pull ${{ env.BASE_IMAGE }} || true
-
-      - name: Pull Last Built Image for Comparison
-        run: docker pull ${{ env.OWN_IMAGE }} || true
-
-      - name: Check if base image has changed
-        id: check_layer
-        run: |
-          layers_image1=$(docker inspect --format='{{range .RootFS.Layers}}{{.}} {{end}}' ${{ env.BASE_IMAGE }})
-          layers_image2=$(docker inspect --format='{{range .RootFS.Layers}}{{.}} {{end}}' ${{ env.OWN_IMAGE }})
-
-          last_layer_image1=$(echo $layers_image1 | awk '{print $NF}')
-
-          if echo $layers_image2 | grep -q $last_layer_image1; then
-            echo "image_changed=false" >> $GITHUB_ENV
-            echo "Der letzte Layer von ${{ env.BASE_IMAGE }} ist ein Bestandteil von ${{ env.OWN_IMAGE }}."
-          else
-            echo "image_changed=true" >> $GITHUB_ENV
-            echo "Der letzte Layer von ${{ env.BASE_IMAGE }} ist kein Bestandteil von ${{ env.OWN_IMAGE }}."
-          fi
-          
-          if [ "${{ github.event.inputs.force_build }}" == "true" ]; then
-            echo "Force build requested."
-            echo "image_changed=true" >> $GITHUB_ENV
-          fi
-
       - name: Build and push Docker image
-        if: env.image_changed == 'true'
         uses: docker/build-push-action@v3
         with:
           push: true
