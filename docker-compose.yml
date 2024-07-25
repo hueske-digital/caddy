@@ -6,6 +6,8 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - $PWD/.env
     entrypoint: /docker/entrypoint.sh
