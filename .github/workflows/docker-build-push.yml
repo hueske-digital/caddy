@@ -1,7 +1,7 @@
 name: Build and Push Docker image
 
 env:
-  CADDY_VERSION: 2.8
+  CADDY_VERSION: 2.9
   OWN_IMAGE: ghcr.io/hueske-digital/caddy:latest
 
 on:
