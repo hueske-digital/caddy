@@ -1,7 +1,6 @@
 name: Build and Push Docker image
 
 env:
-  CADDY_VERSION: 2.9
   OWN_IMAGE: ghcr.io/hueske-digital/caddy:latest
 
 on:
@@ -41,8 +40,6 @@ jobs:
           context: ./build
           tags: ${{ env.OWN_IMAGE }}
           platforms: linux/amd64,linux/arm64
-          build-args: |
-            CADDY_VERSION=${{ env.CADDY_VERSION }}
 
       - name: Do not automatically disable workflow execution
         uses: gautamkrishnar/keepalive-workflow@v1
