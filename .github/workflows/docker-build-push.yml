@@ -45,4 +45,4 @@ jobs:
             CADDY_VERSION=${{ env.CADDY_VERSION }}
 
       - name: Do not automatically disable workflow execution
-        uses: gautamkrishnar/keepalive-workflow@v1
+        uses: gautamkrishnar/keepalive-workflow@v2
