@@ -47,4 +47,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
       - name: Do not automatically disable workflow execution
-        uses: gautamkrishnar/keepalive-workflow@v1
+        uses: gautamkrishnar/keepalive-workflow@v2
