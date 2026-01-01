@@ -63,6 +63,7 @@ jobs:
           context: ./build
           tags: ${{ env.IMAGE_NAME }}:${{ steps.platform.outputs.suffix }}
           platforms: ${{ matrix.platform }}
+          provenance: false
 
   manifest:
     needs: build

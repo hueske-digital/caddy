@@ -60,6 +60,7 @@ jobs:
           context: ./watcher
           tags: ${{ env.IMAGE_NAME }}:watcher-${{ steps.platform.outputs.suffix }}
           platforms: ${{ matrix.platform }}
+          provenance: false
 
   manifest:
     needs: build
