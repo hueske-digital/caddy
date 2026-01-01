@@ -227,7 +227,14 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		statusMgr.Update(caddyMgr.ListConfigs())
 
 	case "connect":
-		log.Printf("Container connected to network: %s", networkName)
+		containerName := event.Actor.Attributes["container"]
+
+		// Ignore if Caddy itself is connecting
+		if containerName == cfg.CaddyContainer {
+			return
+		}
+
+		log.Printf("Container %s connected to network: %s", containerName, networkName)
 
 		// Generate configs for containers in this network (with retry)
 		if err := generateConfigsForNetworkWithRetry(ctx, docker, caddyMgr, networkName, cfg); err != nil {

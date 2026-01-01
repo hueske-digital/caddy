@@ -91,6 +91,17 @@ const statusHTML = `<!DOCTYPE html>
         let currentFilter = 'all';
         let allServices = [];
 
+        // Restore filter from URL hash
+        function loadFilterFromHash() {
+            const hash = window.location.hash.slice(1);
+            if (['all', 'managed', 'manual'].includes(hash)) {
+                currentFilter = hash;
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.filter === currentFilter);
+                });
+            }
+        }
+
         function optionBadge(key, enabled) {
             const opt = options[key];
             const state = enabled ? 'enabled' : 'disabled';
@@ -156,10 +167,12 @@ const statusHTML = `<!DOCTYPE html>
                 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentFilter = btn.dataset.filter;
+                window.location.hash = currentFilter === 'all' ? '' : currentFilter;
                 renderServices();
             });
         });
 
+        loadFilterFromHash();
         loadStatus();
         setInterval(loadStatus, 5000);
     </script>
