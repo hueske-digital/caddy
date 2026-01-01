@@ -48,13 +48,14 @@ var templates = map[string]string{
 type CaddyManager struct {
 	hostsDir         string
 	allowlistManager *AllowlistManager
-	configs          map[string]*CaddyConfig // network -> config
+	configs          map[string]*CaddyConfig // configKey (container_network) -> config
 	mu               sync.RWMutex
 }
 
 // ConfigInfo holds information about a configuration file
 type ConfigInfo struct {
 	Network     string
+	Container   string
 	Type        string
 	Domains     []string
 	Allowlist   []string
@@ -118,9 +119,9 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	allowlistBlock := m.generateAllowlistBlock(cfg)
 	content = strings.ReplaceAll(content, "{{ALLOWLIST_BLOCK}}", allowlistBlock)
 
-	// Determine file path
+	// Determine file path: container_network.conf
 	dir := filepath.Join(m.hostsDir, cfg.Type)
-	path := filepath.Join(dir, cfg.Network+".conf")
+	path := filepath.Join(dir, cfg.ConfigKey()+".conf")
 
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -143,7 +144,7 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	os.Chown(path, 1000, 1000)
 
 	// Store config for status reporting
-	m.configs[cfg.Network] = cfg
+	m.configs[cfg.ConfigKey()] = cfg
 
 	return nil
 }
@@ -164,7 +165,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	// Get resolved IPs from allowlist manager
 	var ips []string
 	if m.allowlistManager != nil {
-		ips = m.allowlistManager.GetResolvedIPs(cfg.Network)
+		ips = m.allowlistManager.GetResolvedIPs(cfg.ConfigKey())
 	}
 
 	// If no resolved IPs yet, resolve now
@@ -172,7 +173,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		// Register with allowlist manager for future updates
 		if m.allowlistManager != nil {
 			m.allowlistManager.Register(cfg)
-			ips = m.allowlistManager.GetResolvedIPs(cfg.Network)
+			ips = m.allowlistManager.GetResolvedIPs(cfg.ConfigKey())
 		}
 	}
 
@@ -195,37 +196,49 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     abort`, ipList, cfg.Upstream)
 }
 
-// RemoveConfig removes a Caddyfile configuration for a network
+// RemoveConfig removes all Caddyfile configurations for a network
+// Matches files ending with _network.conf (e.g., container_network.conf)
 func (m *CaddyManager) RemoveConfig(network string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Unregister from allowlist manager
-	if m.allowlistManager != nil {
-		m.allowlistManager.Unregister(network)
-	}
-
-	// Remove from stored configs
-	delete(m.configs, network)
-
-	// Check all type directories
-	types := []string{"internal", "external", "cloudflare"}
-	var removed bool
-
-	for _, t := range types {
-		path := filepath.Join(m.hostsDir, t, network+".conf")
-		if _, err := os.Stat(path); err == nil {
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("failed to remove %s: %v", path, err)
+	// Remove from stored configs (all keys ending with _network)
+	suffix := "_" + network
+	for key := range m.configs {
+		if strings.HasSuffix(key, suffix) {
+			// Unregister from allowlist manager
+			if m.allowlistManager != nil {
+				m.allowlistManager.Unregister(key)
 			}
-			removed = true
+			delete(m.configs, key)
 		}
 	}
 
-	if removed {
-		return nil
+	// Check all type directories for files matching *_network.conf
+	types := []string{"internal", "external", "cloudflare"}
+	fileSuffix := "_" + network + ".conf"
+
+	for _, t := range types {
+		dir := filepath.Join(m.hostsDir, t)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			if strings.HasSuffix(entry.Name(), fileSuffix) {
+				path := filepath.Join(dir, entry.Name())
+				if err := os.Remove(path); err != nil {
+					return fmt.Errorf("failed to remove %s: %v", path, err)
+				}
+			}
+		}
 	}
-	return nil // Not an error if no config exists
+
+	return nil
 }
 
 // ListConfigs returns all configuration files
@@ -257,21 +270,30 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 			}
 
 			path := filepath.Join(dir, name)
-			network := strings.TrimSuffix(name, ".conf")
+			configKey := strings.TrimSuffix(name, ".conf")
 			domains := extractDomainsFromConfig(path)
+
+			// Parse container and network from filename (container_network)
+			container := ""
+			network := configKey
+			if idx := strings.LastIndex(configKey, "_"); idx > 0 {
+				container = configKey[:idx]
+				network = configKey[idx+1:]
+			}
 
 			// Get allowlist entries if available
 			var allowlist []string
 			if m.allowlistManager != nil {
-				allowlist = m.allowlistManager.GetEntries(network)
+				allowlist = m.allowlistManager.GetEntries(configKey)
 			}
 
 			// Check if this is a managed (watcher-generated) config
-			cfg, isManaged := m.configs[network]
+			cfg, isManaged := m.configs[configKey]
 
 			// Build config info
 			info := ConfigInfo{
 				Network:     network,
+				Container:   container,
 				Type:        t,
 				Domains:     domains,
 				Allowlist:   allowlist,

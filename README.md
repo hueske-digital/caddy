@@ -105,6 +105,7 @@ Set `CADDY_DOMAIN` in `.env` to enable the built-in status page. Defaults to `in
 | `NETWORK_SUFFIX` | `_caddy` | Network suffix to watch |
 | `HOSTS_DIR` | `/hosts` | Config output directory |
 | `DNS_REFRESH_INTERVAL` | `60` | Seconds between DNS refreshes |
+| `CODE_EDITOR_URL` | - | Base URL for editor links in status page |
 
 ### Optional (`.env`)
 

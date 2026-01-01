@@ -12,12 +12,14 @@ type Config struct {
 	CaddyContainer     string
 	NetworkSuffix      string
 	HostsDir           string
-	DNSRefreshInterval int // seconds, default 60
+	DNSRefreshInterval int    // seconds, default 60
+	CodeEditorURL      string // optional, base URL for code editor links
 }
 
 // CaddyConfig holds the parsed configuration for a service
 type CaddyConfig struct {
-	Network     string   // Network name = config filename
+	Network     string   // Network name
+	Container   string   // Container name
 	Domains     []string // From CADDY_DOMAIN (comma-separated)
 	Type        string   // internal, external, cloudflare
 	Upstream    string   // container:port
@@ -26,6 +28,11 @@ type CaddyConfig struct {
 	TLS         bool     // From CADDY_TLS (optional, default true)
 	Compression bool     // From CADDY_COMPRESSION (optional, default true)
 	Header      bool     // From CADDY_HEADER (optional, default true)
+}
+
+// ConfigKey returns the unique key for this config (container_network)
+func (c *CaddyConfig) ConfigKey() string {
+	return c.Container + "_" + c.Network
 }
 
 // LoadConfig loads configuration from environment variables
@@ -54,11 +61,15 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	// Optional code editor URL for linking to config files
+	codeEditorURL := os.Getenv("CODE_EDITOR_URL")
+
 	return &Config{
 		CaddyContainer:     caddyContainer,
 		NetworkSuffix:      networkSuffix,
 		HostsDir:           hostsDir,
 		DNSRefreshInterval: dnsRefreshInterval,
+		CodeEditorURL:      codeEditorURL,
 	}, nil
 }
 
@@ -137,6 +148,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 
 	return &CaddyConfig{
 		Network:     network,
+		Container:   name,
 		Domains:     domains,
 		Type:        typ,
 		Upstream:    upstream,

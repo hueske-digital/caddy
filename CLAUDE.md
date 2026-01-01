@@ -68,9 +68,11 @@ caddy/
 | `HOSTS_DIR` | `/hosts` | Config output directory |
 | `ENABLE_LOGGING` | `true` | Add `import logging` to configs |
 | `DNS_REFRESH_INTERVAL` | `60` | Seconds between allowlist DNS refresh |
+| `CODE_EDITOR_URL` | - | Optional base URL for editor links in status UI |
 
 ## Key Implementation Details
 
+- Config files are named `{container}_{network}.conf` (e.g., `myapp-web-1_myproject_caddy.conf`)
 - Templates are embedded in `watcher/caddy.go` (no external files)
 - Allowlist DNS uses DNS-over-HTTPS (1.1.1.1, 8.8.8.8 fallback)
 - Configs written atomically via temp file + rename

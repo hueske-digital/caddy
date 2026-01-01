@@ -132,7 +132,7 @@ func NewAllowlistManager(refreshInterval int, onChange func(network string)) *Al
 	}
 }
 
-// Register adds or updates an allowlist for a network
+// Register adds or updates an allowlist for a config
 func (m *AllowlistManager) Register(cfg *CaddyConfig) {
 	if len(cfg.Allowlist) == 0 {
 		return
@@ -141,36 +141,37 @@ func (m *AllowlistManager) Register(cfg *CaddyConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.configs[cfg.Network] = cfg
+	key := cfg.ConfigKey()
+	m.configs[key] = cfg
 	// Resolve immediately
 	resolved := m.resolveAllowlist(cfg.Allowlist)
-	m.resolvedIPs[cfg.Network] = resolved
-	log.Printf("Registered allowlist for %s: %v -> %v", cfg.Network, cfg.Allowlist, resolved)
+	m.resolvedIPs[key] = resolved
+	log.Printf("Registered allowlist for %s: %v -> %v", key, cfg.Allowlist, resolved)
 }
 
-// Unregister removes an allowlist for a network
-func (m *AllowlistManager) Unregister(network string) {
+// Unregister removes an allowlist for a config key
+func (m *AllowlistManager) Unregister(configKey string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	delete(m.configs, network)
-	delete(m.resolvedIPs, network)
+	delete(m.configs, configKey)
+	delete(m.resolvedIPs, configKey)
 }
 
-// GetResolvedIPs returns the current resolved IPs for a network
-func (m *AllowlistManager) GetResolvedIPs(network string) []string {
+// GetResolvedIPs returns the current resolved IPs for a config key
+func (m *AllowlistManager) GetResolvedIPs(configKey string) []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return m.resolvedIPs[network]
+	return m.resolvedIPs[configKey]
 }
 
-// GetEntries returns the original allowlist entries for a network
-func (m *AllowlistManager) GetEntries(network string) []string {
+// GetEntries returns the original allowlist entries for a config key
+func (m *AllowlistManager) GetEntries(configKey string) []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if cfg, ok := m.configs[network]; ok {
+	if cfg, ok := m.configs[configKey]; ok {
 		return cfg.Allowlist
 	}
 	return nil
@@ -196,17 +197,17 @@ func (m *AllowlistManager) refreshAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for network, cfg := range m.configs {
-		oldResolved := m.resolvedIPs[network]
+	for configKey, cfg := range m.configs {
+		oldResolved := m.resolvedIPs[configKey]
 		newResolved := m.resolveAllowlistWithFallback(cfg.Allowlist, oldResolved)
 
 		if !equalStringSlices(oldResolved, newResolved) {
-			log.Printf("DNS changed for %s: %v -> %v", network, oldResolved, newResolved)
-			m.resolvedIPs[network] = newResolved
+			log.Printf("DNS changed for %s: %v -> %v", configKey, oldResolved, newResolved)
+			m.resolvedIPs[configKey] = newResolved
 
 			// Notify about change (in goroutine to avoid deadlock)
 			if m.onChange != nil {
-				go m.onChange(network)
+				go m.onChange(configKey)
 			}
 		}
 	}

@@ -13,6 +13,7 @@ func TestWriteConfig_Internal(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:8080",
@@ -26,8 +27,8 @@ func TestWriteConfig_Internal(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Check file exists
-	path := filepath.Join(tmpDir, "internal", "test_caddy.conf")
+	// Check file exists (container_network.conf)
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -64,6 +65,7 @@ func TestWriteConfig_External(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "external",
 		Upstream:    "test-container:80",
@@ -77,7 +79,7 @@ func TestWriteConfig_External(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "external", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -99,6 +101,7 @@ func TestWriteConfig_Cloudflare(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "cloudflare",
 		Upstream:    "test-container:80",
@@ -112,7 +115,7 @@ func TestWriteConfig_Cloudflare(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "cloudflare", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "cloudflare", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -133,6 +136,7 @@ func TestWriteConfig_MultipleDomains(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"a.example.com", "b.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
@@ -146,7 +150,7 @@ func TestWriteConfig_MultipleDomains(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "internal", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -167,6 +171,7 @@ func TestWriteConfig_NoLogging(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
@@ -181,7 +186,7 @@ func TestWriteConfig_NoLogging(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "internal", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -198,6 +203,7 @@ func TestWriteConfig_WithLogging(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
@@ -212,7 +218,7 @@ func TestWriteConfig_WithLogging(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "internal", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -229,6 +235,7 @@ func TestWriteConfig_DisabledOptions(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
@@ -243,7 +250,7 @@ func TestWriteConfig_DisabledOptions(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "internal", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)
@@ -271,6 +278,7 @@ func TestRemoveConfig(t *testing.T) {
 	// Create a config first
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
@@ -285,12 +293,12 @@ func TestRemoveConfig(t *testing.T) {
 	}
 
 	// Verify it exists
-	path := filepath.Join(tmpDir, "internal", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatal("config file should exist")
 	}
 
-	// Remove it
+	// Remove it (by network name - removes all configs for that network)
 	err = mgr.RemoveConfig("test_caddy")
 	if err != nil {
 		t.Fatalf("failed to remove config: %v", err)
@@ -319,8 +327,8 @@ func TestListConfigs(t *testing.T) {
 
 	// Create configs
 	configs := []*CaddyConfig{
-		{Network: "test1_caddy", Domains: []string{"test1.example.com"}, Type: "internal", Upstream: "c1:80", TLS: true, Compression: true, Header: true},
-		{Network: "test2_caddy", Domains: []string{"test2.example.com"}, Type: "external", Upstream: "c2:80", TLS: true, Compression: true, Header: true},
+		{Network: "test1_caddy", Container: "c1", Domains: []string{"test1.example.com"}, Type: "internal", Upstream: "c1:80", TLS: true, Compression: true, Header: true},
+		{Network: "test2_caddy", Container: "c2", Domains: []string{"test2.example.com"}, Type: "external", Upstream: "c2:80", TLS: true, Compression: true, Header: true},
 	}
 
 	for _, cfg := range configs {
@@ -335,10 +343,13 @@ func TestListConfigs(t *testing.T) {
 		t.Errorf("expected 2 configs, got %d", len(list))
 	}
 
-	// Check managed flag
+	// Check managed flag and container
 	for _, info := range list {
 		if !info.Managed {
 			t.Errorf("expected config %s to be managed", info.Network)
+		}
+		if info.Container == "" {
+			t.Errorf("expected container name for %s", info.Network)
 		}
 	}
 }
@@ -416,10 +427,11 @@ func TestInvalidType(t *testing.T) {
 	mgr := NewCaddyManager(tmpDir, nil)
 
 	cfg := &CaddyConfig{
-		Network:  "test_caddy",
-		Domains:  []string{"test.example.com"},
-		Type:     "invalid_type",
-		Upstream: "test-container:80",
+		Network:   "test_caddy",
+		Container: "test-container",
+		Domains:   []string{"test.example.com"},
+		Type:      "invalid_type",
+		Upstream:  "test-container:80",
 	}
 
 	err := mgr.WriteConfig(cfg)
@@ -436,6 +448,7 @@ func TestWriteConfig_Allowlist(t *testing.T) {
 
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
+		Container:   "test-container",
 		Domains:     []string{"test.example.com"},
 		Type:        "external",
 		Upstream:    "test-container:80",
@@ -450,7 +463,7 @@ func TestWriteConfig_Allowlist(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, "external", "test_caddy.conf")
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read config: %v", err)

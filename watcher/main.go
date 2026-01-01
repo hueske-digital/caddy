@@ -37,7 +37,7 @@ func main() {
 
 	// Create managers
 	caddyMgr := NewCaddyManager(cfg.HostsDir, allowlistMgr)
-	statusMgr := NewStatusManager()
+	statusMgr := NewStatusManager(cfg.CodeEditorURL)
 
 	// Start status server only if CADDY_DOMAIN is set (watcher discovers itself)
 	if os.Getenv("CADDY_DOMAIN") != "" {
@@ -46,8 +46,14 @@ func main() {
 	}
 
 	// Set onChange callback for allowlist manager
-	allowlistMgr.onChange = func(network string) {
-		log.Printf("Allowlist IPs changed for %s, regenerating config...", network)
+	// configKey format is "container_network"
+	allowlistMgr.onChange = func(configKey string) {
+		// Extract network from configKey (everything after the last underscore)
+		network := configKey
+		if idx := strings.LastIndex(configKey, "_"); idx > 0 {
+			network = configKey[idx+1:]
+		}
+		log.Printf("Allowlist IPs changed for %s, regenerating config...", configKey)
 		if err := regenerateConfigForNetwork(ctx, docker, caddyMgr, network, cfg); err != nil {
 			log.Printf("Failed to regenerate config for %s: %v", network, err)
 		}
@@ -153,10 +159,10 @@ func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyM
 
 		// Write config
 		if err := caddyMgr.WriteConfig(config); err != nil {
-			log.Printf("Failed to write config for %s: %v", network, err)
+			log.Printf("Failed to write config for %s: %v", config.ConfigKey(), err)
 			continue
 		}
-		log.Printf("Generated config: %s/%s.conf", config.Type, network)
+		log.Printf("Generated config: %s/%s.conf", config.Type, config.ConfigKey())
 	}
 
 	return nil

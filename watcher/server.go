@@ -90,6 +90,7 @@ const statusHTML = `<!DOCTYPE html>
 
         let currentFilter = 'all';
         let allServices = [];
+        let codeEditorUrl = '';
 
         // Restore filter from URL hash
         function loadFilterFromHash() {
@@ -118,6 +119,14 @@ const statusHTML = `<!DOCTYPE html>
             return (svc.domains && svc.domains[0]) || '';
         }
 
+        function configLink(svc) {
+            const name = svc.container ? svc.container + '_' + svc.network : svc.network;
+            if (codeEditorUrl && svc.configPath) {
+                return '<a href="' + codeEditorUrl + svc.configPath + '" target="_blank" rel="noopener">' + name + '</a>';
+            }
+            return name;
+        }
+
         function renderServices() {
             const tbody = document.querySelector('#services tbody');
             let services = allServices;
@@ -142,7 +151,7 @@ const statusHTML = `<!DOCTYPE html>
                         <td class="mono">${(svc.allowlist || []).join(', ') || '-'}</td>
                         <td>${optionBadge('log', svc.logging)}${optionBadge('dns', svc.tls)}${optionBadge('gzip', svc.compression)}${optionBadge('security', svc.header)}</td>
                         <td><span class="badge ${svc.managed ? 'badge-managed' : 'badge-manual'}">${svc.managed ? 'managed' : 'manual'}</span></td>
-                        <td class="mono">${svc.network}</td>
+                        <td class="mono">${configLink(svc)}</td>
                     </tr>
                 ` + "`" + `).join('');
             }
@@ -155,6 +164,7 @@ const statusHTML = `<!DOCTYPE html>
 
                 document.querySelector('.updated').textContent = new Date(data.updated).toLocaleString();
                 allServices = data.services || [];
+                codeEditorUrl = data.codeEditorUrl || '';
                 renderServices();
             } catch (err) {
                 document.querySelector('.updated').textContent = 'Error: ' + err.message;

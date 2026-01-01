@@ -10,6 +10,7 @@ import (
 // ServiceStatus represents a service in the status
 type ServiceStatus struct {
 	Network     string   `json:"network"`
+	Container   string   `json:"container,omitempty"`
 	Type        string   `json:"type"`
 	Domains     []string `json:"domains"`
 	Allowlist   []string `json:"allowlist,omitempty"`
@@ -18,13 +19,15 @@ type ServiceStatus struct {
 	Compression bool     `json:"compression"`
 	Header      bool     `json:"header"`
 	Managed     bool     `json:"managed"`
+	ConfigPath  string   `json:"configPath,omitempty"`
 }
 
 // Status represents the status structure
 type Status struct {
-	Services []ServiceStatus `json:"services"`
-	Summary  StatusSummary   `json:"summary"`
-	Updated  string          `json:"updated"`
+	Services      []ServiceStatus `json:"services"`
+	Summary       StatusSummary   `json:"summary"`
+	Updated       string          `json:"updated"`
+	CodeEditorURL string          `json:"codeEditorUrl,omitempty"`
 }
 
 // StatusSummary provides quick stats
@@ -39,16 +42,19 @@ type StatusSummary struct {
 
 // StatusManager manages the status in memory
 type StatusManager struct {
-	current *Status
-	mu      sync.RWMutex
+	current       *Status
+	codeEditorURL string
+	mu            sync.RWMutex
 }
 
 // NewStatusManager creates a new StatusManager
-func NewStatusManager() *StatusManager {
+func NewStatusManager(codeEditorURL string) *StatusManager {
 	return &StatusManager{
+		codeEditorURL: codeEditorURL,
 		current: &Status{
-			Services: []ServiceStatus{},
-			Updated:  time.Now().Format(time.RFC3339),
+			Services:      []ServiceStatus{},
+			Updated:       time.Now().Format(time.RFC3339),
+			CodeEditorURL: codeEditorURL,
 		},
 	}
 }
@@ -64,6 +70,7 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 	for _, cfg := range configs {
 		services = append(services, ServiceStatus{
 			Network:     cfg.Network,
+			Container:   cfg.Container,
 			Type:        cfg.Type,
 			Domains:     cfg.Domains,
 			Allowlist:   cfg.Allowlist,
@@ -72,6 +79,7 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			Compression: cfg.Compression,
 			Header:      cfg.Header,
 			Managed:     cfg.Managed,
+			ConfigPath:  cfg.Path,
 		})
 	}
 
@@ -96,9 +104,10 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 	}
 
 	m.current = &Status{
-		Services: services,
-		Summary:  summary,
-		Updated:  time.Now().Format(time.RFC3339),
+		Services:      services,
+		Summary:       summary,
+		Updated:       time.Now().Format(time.RFC3339),
+		CodeEditorURL: m.codeEditorURL,
 	}
 }
 
