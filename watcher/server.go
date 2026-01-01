@@ -63,12 +63,12 @@ const statusHTML = `<!DOCTYPE html>
             <table id="services" role="grid">
                 <thead>
                     <tr>
-                        <th scope="col">Config</th>
-                        <th scope="col">Type</th>
                         <th scope="col">Domains</th>
+                        <th scope="col">Type</th>
                         <th scope="col">Allowlist</th>
                         <th scope="col">Options</th>
                         <th scope="col">Source</th>
+                        <th scope="col">Config</th>
                     </tr>
                 </thead>
                 <tbody></tbody>

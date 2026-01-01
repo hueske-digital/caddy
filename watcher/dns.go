@@ -197,8 +197,8 @@ func (m *AllowlistManager) refreshAll() {
 	defer m.mu.Unlock()
 
 	for network, cfg := range m.configs {
-		newResolved := m.resolveAllowlist(cfg.Allowlist)
 		oldResolved := m.resolvedIPs[network]
+		newResolved := m.resolveAllowlistWithFallback(cfg.Allowlist, oldResolved)
 
 		if !equalStringSlices(oldResolved, newResolved) {
 			log.Printf("DNS changed for %s: %v -> %v", network, oldResolved, newResolved)
@@ -230,6 +230,19 @@ func (m *AllowlistManager) resolveAllowlist(entries []string) []string {
 	// Sort for consistent comparison
 	sort.Strings(allIPs)
 	return allIPs
+}
+
+// resolveAllowlistWithFallback resolves allowlist entries, keeping previous IPs on failure
+func (m *AllowlistManager) resolveAllowlistWithFallback(entries []string, previousIPs []string) []string {
+	newResolved := m.resolveAllowlist(entries)
+
+	// If resolution returned nothing but we had previous IPs, keep them
+	if len(newResolved) == 0 && len(previousIPs) > 0 {
+		log.Printf("DNS resolution failed, keeping previous IPs: %v", previousIPs)
+		return previousIPs
+	}
+
+	return newResolved
 }
 
 // resolveEntry resolves a single entry (hostname or IP) to IPs

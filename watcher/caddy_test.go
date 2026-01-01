@@ -41,6 +41,9 @@ func TestWriteConfig_Internal(t *testing.T) {
 	if !strings.Contains(contentStr, "import internal") {
 		t.Error("expected import internal")
 	}
+	if !strings.Contains(contentStr, "@internal") {
+		t.Error("expected @internal matcher")
+	}
 	if !strings.Contains(contentStr, "reverse_proxy test-container:8080") {
 		t.Error("expected reverse_proxy directive")
 	}
@@ -422,5 +425,48 @@ func TestInvalidType(t *testing.T) {
 	err := mgr.WriteConfig(cfg)
 	if err == nil {
 		t.Error("expected error for invalid type")
+	}
+}
+
+func TestWriteConfig_Allowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create AllowlistManager to test allowlist functionality
+	am := NewAllowlistManager(0, nil) // 0 = no auto-refresh, nil = no callback
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		Allowlist:   []string{"1.2.3.4", "5.6.7.8"},
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "@allowed") {
+		t.Error("expected @allowed matcher")
+	}
+	if !strings.Contains(contentStr, "remote_ip") {
+		t.Error("expected remote_ip directive")
+	}
+	if !strings.Contains(contentStr, "1.2.3.4") {
+		t.Error("expected first IP in allowlist")
+	}
+	if !strings.Contains(contentStr, "5.6.7.8") {
+		t.Error("expected second IP in allowlist")
 	}
 }
