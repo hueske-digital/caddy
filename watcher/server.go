@@ -7,153 +7,193 @@ import (
 )
 
 const statusHTML = `<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Proxy Overview</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <style>
-        :root { --pico-font-size: 16px; }
-        .badge {
-            display: inline-block;
-            padding: 0.2rem 0.5rem;
-            font-size: 0.7rem;
-            font-weight: 600;
-            border-radius: var(--pico-border-radius);
-            text-transform: uppercase;
-            margin-right: 0.25rem;
-            cursor: help;
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] }
+                }
+            }
         }
-        .badge-managed { background: var(--pico-primary); color: var(--pico-primary-inverse); }
-        .badge-manual { background: var(--pico-secondary); color: var(--pico-secondary-inverse); }
-        .badge-external { background: #2563eb; color: white; }
-        .badge-internal { background: #7c3aed; color: white; }
-        .badge-cloudflare { background: #f97316; color: white; }
-        .badge-on { background: #22c55e; color: white; }
-        .badge-off { background: #ef4444; color: white; }
-        .mono { font-family: var(--pico-font-family-monospace); font-size: 0.85rem; }
-        header { margin-bottom: 1.5rem; }
-        h1 { margin-bottom: 0.25rem; }
-        .updated { color: var(--pico-muted-color); font-size: 0.8rem; margin: 0.5rem 0 0 0; }
-        table tbody tr:nth-child(odd) td { background: var(--pico-background-color) !important; }
-        table tbody tr:nth-child(even) td { background: #f1f5f9 !important; }
-        .filters { margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center; }
-        .filters span { font-size: 0.9rem; color: var(--pico-muted-color); }
-        .filter-btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; cursor: pointer; border-radius: var(--pico-border-radius); border: 1px solid var(--pico-muted-border-color) !important; background: var(--pico-background-color) !important; color: var(--pico-color) !important; transition: all 0.2s; }
-        .filter-btn:hover { border-color: var(--pico-primary) !important; }
-        .filter-btn.active { background: var(--pico-primary) !important; color: var(--pico-primary-inverse) !important; border-color: var(--pico-primary) !important; }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        [data-tooltip] { position: relative; }
+        [data-tooltip]:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 10px;
+            background: #18181b;
+            color: white;
+            font-size: 12px;
+            border-radius: 6px;
+            white-space: nowrap;
+            z-index: 50;
+            margin-bottom: 4px;
+        }
     </style>
 </head>
-<body>
-    <main class="container">
-        <header>
-            <h1>Proxy Overview</h1>
-            <p class="updated">Loading...</p>
-        </header>
-
-        <div class="filters">
-            <span>Filter:</span>
-            <button class="filter-btn active" data-filter="all">All</button>
-            <button class="filter-btn" data-filter="managed">Managed</button>
-            <button class="filter-btn" data-filter="manual">Manual</button>
+<body class="bg-zinc-50 text-zinc-900 min-h-screen">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-2xl font-semibold text-zinc-900">Proxy Overview</h1>
+            <p class="text-sm text-zinc-500 mt-1" id="updated">Loading...</p>
         </div>
 
-        <div class="overflow-auto">
-            <table id="services" role="grid">
-                <thead>
-                    <tr>
-                        <th scope="col">Domains</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Allowlist</th>
-                        <th scope="col">Options</th>
-                        <th scope="col">Source</th>
-                        <th scope="col">Config</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+        <!-- Filters -->
+        <div class="flex items-center gap-2 mb-6">
+            <span class="text-sm text-zinc-500">Filter:</span>
+            <div class="inline-flex rounded-lg border border-zinc-200 bg-white p-1">
+                <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="all">All</button>
+                <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="managed">Managed</button>
+                <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="manual">Manual</button>
+            </div>
         </div>
 
-        <footer>
-            <small><a href="/api/status">JSON API</a></small>
-        </footer>
-    </main>
+        <!-- Table -->
+        <div class="bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b border-zinc-200 bg-zinc-50/50">
+                            <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Domain</th>
+                            <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Type</th>
+                            <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Allowlist</th>
+                            <th class="text-center text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Options</th>
+                            <th class="text-center text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 w-20">Config</th>
+                        </tr>
+                    </thead>
+                    <tbody id="services" class="divide-y divide-zinc-100"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-6 text-center">
+            <a href="/api/status" class="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">JSON API</a>
+        </div>
+    </div>
+
     <script>
-        const options = {
-            log: { label: 'log', desc: 'Request logging', env: 'CADDY_LOGGING' },
-            dns: { label: 'dns', desc: 'TLS via Cloudflare DNS challenge', env: 'CADDY_TLS' },
-            gzip: { label: 'gzip', desc: 'zstd/gzip compression', env: 'CADDY_COMPRESSION' },
-            security: { label: 'security', desc: 'Security headers', env: 'CADDY_HEADER' }
-        };
-
         let currentFilter = 'all';
         let allServices = [];
         let codeEditorUrl = '';
 
-        // Restore filter from URL hash
+        // Icons as inline SVGs
+        const icons = {
+            log: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>',
+            tls: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>',
+            gzip: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7zm4 0h8m-8 4h8m-8 4h4"/></svg>',
+            security: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>',
+            external: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>',
+            managed: '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
+            manual: '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>'
+        };
+
+        const optionInfo = {
+            log: 'Request logging',
+            tls: 'TLS enabled',
+            gzip: 'Compression',
+            security: 'Security headers'
+        };
+
         function loadFilterFromHash() {
             const hash = window.location.hash.slice(1);
             if (['all', 'managed', 'manual'].includes(hash)) {
                 currentFilter = hash;
-                document.querySelectorAll('.filter-btn').forEach(b => {
-                    b.classList.toggle('active', b.dataset.filter === currentFilter);
-                });
             }
+            updateFilterButtons();
         }
 
-        function optionBadge(key, enabled) {
-            const opt = options[key];
-            const state = enabled ? 'enabled' : 'disabled';
-            const cls = enabled ? 'badge-on' : 'badge-off';
-            return '<span class="badge ' + cls + '" title="' + opt.desc + ' (' + state + ')\n' + opt.env + '">' + opt.label + '</span>';
+        function updateFilterButtons() {
+            document.querySelectorAll('.filter-btn').forEach(b => {
+                const isActive = b.dataset.filter === currentFilter;
+                b.classList.toggle('bg-zinc-900', isActive);
+                b.classList.toggle('text-white', isActive);
+                b.classList.toggle('text-zinc-600', !isActive);
+                b.classList.toggle('hover:bg-zinc-100', !isActive);
+            });
         }
 
         function domainLinks(domains) {
-            if (!domains || domains.length === 0) return '-';
-            return domains.map(d => '<a href="https://' + d + '" target="_blank" rel="noopener">' + d + '</a>').join(', ');
+            if (!domains || domains.length === 0) return '<span class="text-zinc-400">—</span>';
+            return domains.map(d =>
+                '<a href="https://' + d + '" target="_blank" class="text-zinc-900 hover:text-blue-600 transition-colors">' + d + '</a>'
+            ).join('<span class="text-zinc-300 mx-1">,</span> ');
+        }
+
+        function typeLabel(type, managed) {
+            const colors = {
+                external: 'text-blue-600',
+                internal: 'text-violet-600',
+                cloudflare: 'text-orange-500'
+            };
+            const dot = managed
+                ? '<span class="text-emerald-500 mr-1.5" data-tooltip="Managed">' + icons.managed + '</span>'
+                : '<span class="text-zinc-400 mr-1.5" data-tooltip="Manual">' + icons.manual + '</span>';
+            return dot + '<span class="' + (colors[type] || 'text-zinc-600') + ' font-medium">' + type + '</span>';
+        }
+
+        function optionIcons(svc) {
+            const opts = [
+                { key: 'log', enabled: svc.logging },
+                { key: 'tls', enabled: svc.tls },
+                { key: 'gzip', enabled: svc.compression },
+                { key: 'security', enabled: svc.header }
+            ];
+            return opts.map(o => {
+                const cls = o.enabled ? 'text-emerald-500' : 'text-zinc-300';
+                const tooltip = optionInfo[o.key] + (o.enabled ? ' ✓' : ' ✗');
+                return '<span class="' + cls + '" data-tooltip="' + tooltip + '">' + icons[o.key] + '</span>';
+            }).join('');
+        }
+
+        function configLink(svc) {
+            if (!codeEditorUrl || !svc.configPath) {
+                return '<span class="text-zinc-300">—</span>';
+            }
+            const folder = svc.configPath.substring(0, svc.configPath.lastIndexOf('/'));
+            return '<a href="' + codeEditorUrl + folder + '" target="_blank" class="text-zinc-400 hover:text-zinc-600 transition-colors" data-tooltip="Open in editor">' + icons.external + '</a>';
         }
 
         function getFirstDomain(svc) {
             return (svc.domains && svc.domains[0]) || '';
         }
 
-        function configLink(svc) {
-            const name = svc.container ? svc.container + '_' + svc.network : svc.network;
-            if (codeEditorUrl && svc.configPath) {
-                // Link to folder only (remove filename)
-                const folder = svc.configPath.substring(0, svc.configPath.lastIndexOf('/'));
-                return '<a href="' + codeEditorUrl + folder + '" target="_blank" rel="noopener">' + name + '</a>';
-            }
-            return name;
-        }
-
         function renderServices() {
-            const tbody = document.querySelector('#services tbody');
+            const tbody = document.getElementById('services');
             let services = allServices;
 
-            // Apply filter
             if (currentFilter === 'managed') {
                 services = services.filter(s => s.managed);
             } else if (currentFilter === 'manual') {
                 services = services.filter(s => !s.managed);
             }
 
-            // Sort by first domain A-Z
             services = services.slice().sort((a, b) => getFirstDomain(a).localeCompare(getFirstDomain(b)));
 
             if (services.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6">No services configured</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-zinc-400">No services configured</td></tr>';
             } else {
                 tbody.innerHTML = services.map(svc => ` + "`" + `
-                    <tr>
-                        <td class="mono">${domainLinks(svc.domains)}</td>
-                        <td><span class="badge badge-${svc.type}">${svc.type}</span></td>
-                        <td class="mono">${(svc.allowlist || []).join(', ') || '-'}</td>
-                        <td>${optionBadge('log', svc.logging)}${optionBadge('dns', svc.tls)}${optionBadge('gzip', svc.compression)}${optionBadge('security', svc.header)}</td>
-                        <td><span class="badge ${svc.managed ? 'badge-managed' : 'badge-manual'}">${svc.managed ? 'managed' : 'manual'}</span></td>
-                        <td class="mono">${configLink(svc)}</td>
+                    <tr class="hover:bg-zinc-50/50 transition-colors">
+                        <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
+                        <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
+                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).join(', ') || '<span class="text-zinc-300">—</span>'}</td>
+                        <td class="px-4 py-3"><div class="flex items-center justify-center gap-2">${optionIcons(svc)}</div></td>
+                        <td class="px-4 py-3 text-center">${configLink(svc)}</td>
                     </tr>
                 ` + "`" + `).join('');
             }
@@ -163,23 +203,20 @@ const statusHTML = `<!DOCTYPE html>
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-
-                document.querySelector('.updated').textContent = new Date(data.updated).toLocaleString();
+                document.getElementById('updated').textContent = 'Updated ' + new Date(data.updated).toLocaleString();
                 allServices = data.services || [];
                 codeEditorUrl = data.codeEditorUrl || '';
                 renderServices();
             } catch (err) {
-                document.querySelector('.updated').textContent = 'Error: ' + err.message;
+                document.getElementById('updated').textContent = 'Error: ' + err.message;
             }
         }
 
-        // Filter button handlers
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
                 currentFilter = btn.dataset.filter;
                 window.location.hash = currentFilter === 'all' ? '' : currentFilter;
+                updateFilterButtons();
                 renderServices();
             });
         });
