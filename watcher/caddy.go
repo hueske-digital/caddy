@@ -343,7 +343,7 @@ func extractDomainsFromConfig(path string) []string {
 					domains = append(domains, part)
 				}
 			}
-			break // Only process first domain line
+			// Continue to find all domain blocks in file
 		}
 	}
 
