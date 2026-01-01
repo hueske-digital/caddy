@@ -122,7 +122,9 @@ const statusHTML = `<!DOCTYPE html>
         function configLink(svc) {
             const name = svc.container ? svc.container + '_' + svc.network : svc.network;
             if (codeEditorUrl && svc.configPath) {
-                return '<a href="' + codeEditorUrl + svc.configPath + '" target="_blank" rel="noopener">' + name + '</a>';
+                // Link to folder only (remove filename)
+                const folder = svc.configPath.substring(0, svc.configPath.lastIndexOf('/'));
+                return '<a href="' + codeEditorUrl + folder + '" target="_blank" rel="noopener">' + name + '</a>';
             }
             return name;
         }
