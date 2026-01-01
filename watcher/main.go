@@ -41,7 +41,7 @@ func main() {
 
 	// Start status server only if CADDY_DOMAIN is set (watcher discovers itself)
 	if os.Getenv("CADDY_DOMAIN") != "" {
-		statusServer := NewStatusServer(statusMgr, 8080)
+		statusServer := NewStatusServer(statusMgr, caddyMgr, 8080)
 		statusServer.Start()
 	}
 

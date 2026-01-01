@@ -169,13 +169,15 @@ const statusHTML = `<!DOCTYPE html>
 // StatusServer serves the status page and API
 type StatusServer struct {
 	statusMgr *StatusManager
+	caddyMgr  *CaddyManager
 	port      int
 }
 
 // NewStatusServer creates a new status server
-func NewStatusServer(statusMgr *StatusManager, port int) *StatusServer {
+func NewStatusServer(statusMgr *StatusManager, caddyMgr *CaddyManager, port int) *StatusServer {
 	return &StatusServer{
 		statusMgr: statusMgr,
+		caddyMgr:  caddyMgr,
 		port:      port,
 	}
 }
@@ -205,6 +207,11 @@ func (s *StatusServer) handleHTML(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *StatusServer) handleJSON(w http.ResponseWriter, r *http.Request) {
+	// Refresh from disk to catch manual changes
+	if s.caddyMgr != nil {
+		s.statusMgr.Update(s.caddyMgr.ListConfigs())
+	}
+
 	data, err := s.statusMgr.GetJSON()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
