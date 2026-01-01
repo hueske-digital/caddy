@@ -152,6 +152,15 @@ func (d *DockerClient) GetContainerNetworks(containerID string) ([]string, error
 	return networks, nil
 }
 
+// GetContainerName returns the name of a container by ID
+func (d *DockerClient) GetContainerName(containerID string) (string, error) {
+	inspect, err := d.cli.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(inspect.Name, "/"), nil
+}
+
 // WatchEvents starts watching Docker events and calls the handler for each relevant event
 func (d *DockerClient) WatchEvents(ctx context.Context) (<-chan events.Message, <-chan error) {
 	filterArgs := filters.NewArgs()
@@ -227,7 +236,14 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		statusMgr.Update(caddyMgr.ListConfigs())
 
 	case "connect":
-		containerName := event.Actor.Attributes["container"]
+		containerID := event.Actor.Attributes["container"]
+
+		// Resolve container name from ID
+		containerName, err := docker.GetContainerName(containerID)
+		if err != nil {
+			// Container might be gone already
+			return
+		}
 
 		// Ignore if Caddy itself is connecting
 		if containerName == cfg.CaddyContainer {
@@ -245,14 +261,25 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		statusMgr.Update(caddyMgr.ListConfigs())
 
 	case "disconnect":
-		containerName := event.Actor.Attributes["container"]
+		containerID := event.Actor.Attributes["container"]
+
+		// Try to resolve container name from ID (might fail if container is gone)
+		containerName, err := docker.GetContainerName(containerID)
+		if err != nil {
+			// Container is gone, use short ID for logging
+			if len(containerID) > 12 {
+				containerName = containerID[:12]
+			} else {
+				containerName = containerID
+			}
+		}
 
 		// Ignore if Caddy itself is disconnecting
 		if containerName == cfg.CaddyContainer {
 			return
 		}
 
-		log.Printf("Container disconnected from network: %s", networkName)
+		log.Printf("Container %s disconnected from network: %s", containerName, networkName)
 
 		// Check if any non-Caddy containers remain in this network
 		containers, err := docker.GetNetworkContainers(networkName)
