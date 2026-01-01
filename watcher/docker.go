@@ -63,6 +63,34 @@ func (d *DockerClient) ConnectToNetwork(networkName, containerName string) error
 	return nil
 }
 
+// DisconnectFromNetwork disconnects a container from a network
+func (d *DockerClient) DisconnectFromNetwork(networkName, containerName string) error {
+	err := d.cli.NetworkDisconnect(context.Background(), networkName, containerName, false)
+	if err != nil {
+		// Check if not connected
+		if strings.Contains(err.Error(), "is not connected") {
+			return nil
+		}
+		return err
+	}
+	log.Printf("Disconnected from %s", networkName)
+	return nil
+}
+
+// RemoveNetwork removes a network
+func (d *DockerClient) RemoveNetwork(networkName string) error {
+	err := d.cli.NetworkRemove(context.Background(), networkName)
+	if err != nil {
+		// Ignore if already gone or still in use
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "has active endpoints") {
+			return nil
+		}
+		return err
+	}
+	log.Printf("Removed network %s", networkName)
+	return nil
+}
+
 // ConnectToNetworkWithRetry connects a container to a network with retry logic
 func (d *DockerClient) ConnectToNetworkWithRetry(ctx context.Context, networkName, containerName string) error {
 	maxRetries := 3
@@ -208,6 +236,61 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 
 		// Update status
 		statusMgr.Update(caddyMgr.ListConfigs())
+
+	case "disconnect":
+		containerName := event.Actor.Attributes["container"]
+
+		// Ignore if Caddy itself is disconnecting
+		if containerName == cfg.CaddyContainer {
+			return
+		}
+
+		log.Printf("Container disconnected from network: %s", networkName)
+
+		// Check if any non-Caddy containers remain in this network
+		containers, err := docker.GetNetworkContainers(networkName)
+		if err != nil {
+			// Network might already be gone
+			return
+		}
+
+		hasOtherContainers := false
+		for _, c := range containers {
+			// Check all names (container can have multiple)
+			for _, name := range c.Names {
+				// Names have leading slash
+				if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
+					hasOtherContainers = true
+					break
+				}
+			}
+			if hasOtherContainers {
+				break
+			}
+		}
+
+		// If only Caddy (or no containers) remain, disconnect Caddy and cleanup
+		if !hasOtherContainers {
+			log.Printf("No service containers in %s, cleaning up", networkName)
+
+			// Disconnect Caddy from network
+			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
+				log.Printf("Failed to disconnect from %s: %v", networkName, err)
+			}
+
+			// Remove the network (so docker compose down doesn't error)
+			if err := docker.RemoveNetwork(networkName); err != nil {
+				log.Printf("Failed to remove network %s: %v", networkName, err)
+			}
+
+			// Remove config for this network
+			if err := caddyMgr.RemoveConfig(networkName); err != nil {
+				log.Printf("Failed to remove config for %s: %v", networkName, err)
+			}
+
+			// Update status
+			statusMgr.Update(caddyMgr.ListConfigs())
+		}
 	}
 }
 
