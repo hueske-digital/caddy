@@ -1,12 +1,4 @@
-package main
-
-import (
-	"fmt"
-	"log"
-	"net/http"
-)
-
-const statusHTML = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -26,7 +18,7 @@ const statusHTML = `<!DOCTYPE html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        [data-tooltip] { position: relative; }
+        [data-tooltip], [data-tooltip-right] { position: relative; }
         [data-tooltip]:hover::after {
             content: attr(data-tooltip);
             position: absolute;
@@ -98,14 +90,14 @@ const statusHTML = `<!DOCTYPE html>
 
         <!-- Footer -->
         <div class="mt-6 text-center">
-            <a href="/api/status" class="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">JSON API</a>
+            <a href="#" class="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">JSON API</a>
         </div>
     </div>
 
     <script>
         let currentFilter = 'all';
         let allServices = [];
-        let codeEditorUrl = '';
+        let codeEditorUrl = 'https://code.example.com/?folder=';
 
         // Icons as inline SVGs
         const icons = {
@@ -123,6 +115,86 @@ const statusHTML = `<!DOCTYPE html>
             tls: 'TLS enabled',
             gzip: 'Compression',
             security: 'Security headers'
+        };
+
+        // Mock data for testing
+        const mockData = {
+            updated: new Date().toISOString(),
+            codeEditorUrl: 'https://code.example.com/?folder=',
+            services: [
+                {
+                    domains: ['app.example.com'],
+                    type: 'external',
+                    managed: true,
+                    container: 'myapp',
+                    allowlist: [],
+                    logging: true,
+                    tls: true,
+                    compression: true,
+                    header: true,
+                    configPath: '/hosts/external/myapp_caddy.conf'
+                },
+                {
+                    domains: ['api.example.com', 'api2.example.com'],
+                    type: 'external',
+                    managed: true,
+                    container: 'api',
+                    allowlist: ['home.dyndns.org', '1.2.3.4'],
+                    logging: false,
+                    tls: true,
+                    compression: true,
+                    header: true,
+                    configPath: '/hosts/external/api_caddy.conf'
+                },
+                {
+                    domains: ['dashboard.example.com'],
+                    type: 'internal',
+                    managed: true,
+                    container: 'dashboard',
+                    allowlist: [],
+                    logging: false,
+                    tls: true,
+                    compression: true,
+                    header: true,
+                    configPath: '/hosts/internal/dashboard_caddy.conf'
+                },
+                {
+                    domains: ['cdn.example.com'],
+                    type: 'cloudflare',
+                    managed: true,
+                    container: 'cdn',
+                    allowlist: [],
+                    logging: false,
+                    tls: true,
+                    compression: false,
+                    header: true,
+                    configPath: '/hosts/cloudflare/cdn_caddy.conf'
+                },
+                {
+                    domains: ['legacy.example.com'],
+                    type: 'internal',
+                    managed: false,
+                    container: '',
+                    allowlist: [],
+                    logging: false,
+                    tls: true,
+                    compression: true,
+                    header: false,
+                    configPath: '/hosts/internal/legacy.conf'
+                },
+                {
+                    domains: ['movies.example.com', 'series.example.com', 'downloads.example.com'],
+                    type: 'internal',
+                    managed: false,
+                    container: '',
+                    allowlist: [],
+                    logging: false,
+                    tls: true,
+                    compression: true,
+                    header: true,
+                    configPath: '/hosts/internal/vpn-services.conf'
+                }
+            ]
         };
 
         function loadFilterFromHash() {
@@ -203,7 +275,7 @@ const statusHTML = `<!DOCTYPE html>
             if (services.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-zinc-400">No services configured</td></tr>';
             } else {
-                tbody.innerHTML = services.map(svc => ` + "`" + `
+                tbody.innerHTML = services.map(svc => `
                     <tr class="hover:bg-zinc-50/50 transition-colors">
                         <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
                         <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
@@ -211,21 +283,17 @@ const statusHTML = `<!DOCTYPE html>
                         <td class="px-4 py-3"><div class="flex items-center justify-center gap-2">${optionIcons(svc)}</div></td>
                         <td class="px-4 py-3 text-center">${configLink(svc)}</td>
                     </tr>
-                ` + "`" + `).join('');
+                `).join('');
             }
         }
 
         async function loadStatus() {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                document.getElementById('updated').textContent = 'Updated ' + new Date(data.updated).toLocaleString();
-                allServices = data.services || [];
-                codeEditorUrl = data.codeEditorUrl || '';
-                renderServices();
-            } catch (err) {
-                document.getElementById('updated').textContent = 'Error: ' + err.message;
-            }
+            // Use mock data for local testing
+            const data = mockData;
+            document.getElementById('updated').textContent = 'Updated ' + new Date(data.updated).toLocaleString();
+            allServices = data.services || [];
+            codeEditorUrl = data.codeEditorUrl || '';
+            renderServices();
         }
 
         document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -239,65 +307,6 @@ const statusHTML = `<!DOCTYPE html>
 
         loadFilterFromHash();
         loadStatus();
-        setInterval(loadStatus, 5000);
     </script>
 </body>
-</html>`
-
-// StatusServer serves the status page and API
-type StatusServer struct {
-	statusMgr *StatusManager
-	caddyMgr  *CaddyManager
-	port      int
-}
-
-// NewStatusServer creates a new status server
-func NewStatusServer(statusMgr *StatusManager, caddyMgr *CaddyManager, port int) *StatusServer {
-	return &StatusServer{
-		statusMgr: statusMgr,
-		caddyMgr:  caddyMgr,
-		port:      port,
-	}
-}
-
-// Start starts the HTTP server
-func (s *StatusServer) Start() {
-	http.HandleFunc("/", s.handleHTML)
-	http.HandleFunc("/api/status", s.handleJSON)
-
-	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("[watcher] Status server listening on %s", addr)
-
-	go func() {
-		if err := http.ListenAndServe(addr, nil); err != nil {
-			log.Printf("[watcher] Status server error: %v", err)
-		}
-	}()
-}
-
-func (s *StatusServer) handleHTML(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(statusHTML))
-}
-
-func (s *StatusServer) handleJSON(w http.ResponseWriter, r *http.Request) {
-	// Refresh from disk to catch manual changes
-	if s.caddyMgr != nil {
-		s.statusMgr.Update(s.caddyMgr.ListConfigs())
-	}
-
-	data, err := s.statusMgr.GetJSON()
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"failed to get status"}`))
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
-}
+</html>
