@@ -18,7 +18,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: watcher/go.sum
+
+      - name: Run unit tests
+        working-directory: ./watcher
+        run: go test -v ./...
+
   build:
+    needs: test
+
     permissions:
       contents: read
       packages: write
