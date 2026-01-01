@@ -63,6 +63,7 @@ type ConfigInfo struct {
 	Compression bool
 	Header      bool
 	Path        string
+	Managed     bool
 }
 
 // NewCaddyManager creates a new CaddyManager
@@ -265,20 +266,24 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				allowlist = m.allowlistManager.GetEntries(network)
 			}
 
-			// Get stored config for feature flags
+			// Check if this is a managed (watcher-generated) config
+			cfg, isManaged := m.configs[network]
+
+			// Build config info
 			info := ConfigInfo{
 				Network:     network,
 				Type:        t,
 				Domains:     domains,
 				Allowlist:   allowlist,
 				Path:        path,
-				TLS:         true,         // defaults
+				TLS:         true, // defaults
 				Compression: true,
 				Header:      true,
+				Managed:     isManaged,
 			}
 
-			// Use stored config if available (for managed configs)
-			if cfg, ok := m.configs[network]; ok {
+			// Use stored config for feature flags (managed configs only)
+			if isManaged {
 				info.Logging = cfg.Logging
 				info.TLS = cfg.TLS
 				info.Compression = cfg.Compression

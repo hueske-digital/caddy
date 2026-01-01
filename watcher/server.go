@@ -82,6 +82,11 @@ const statusHTML = `<!DOCTYPE html>
             return '<span class="badge ' + cls + '" title="' + opt.desc + ' (' + state + ')\n' + opt.env + '">' + opt.label + '</span>';
         }
 
+        function domainLinks(domains) {
+            if (!domains || domains.length === 0) return '-';
+            return domains.map(d => '<a href="https://' + d + '" target="_blank" rel="noopener">' + d + '</a>').join(', ');
+        }
+
         async function loadStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -97,7 +102,7 @@ const statusHTML = `<!DOCTYPE html>
                         <tr>
                             <td class="mono">${svc.network}</td>
                             <td><span class="badge badge-${svc.type}">${svc.type}</span></td>
-                            <td class="mono">${(svc.domains || []).join(', ') || '-'}</td>
+                            <td class="mono">${domainLinks(svc.domains)}</td>
                             <td class="mono">${(svc.allowlist || []).join(', ') || '-'}</td>
                             <td>${optionBadge('log', svc.logging)}${optionBadge('dns', svc.tls)}${optionBadge('gzip', svc.compression)}${optionBadge('security', svc.header)}</td>
                             <td><span class="badge ${svc.managed ? 'badge-managed' : 'badge-manual'}">${svc.managed ? 'managed' : 'manual'}</span></td>

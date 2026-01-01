@@ -54,16 +54,14 @@ func NewStatusManager() *StatusManager {
 }
 
 // Update updates the in-memory status
-func (m *StatusManager) Update(managedConfigs []ConfigInfo) {
+func (m *StatusManager) Update(configs []ConfigInfo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	var services []ServiceStatus
-	managedNetworks := make(map[string]bool)
 
-	// Add managed (auto-generated) configs
-	for _, cfg := range managedConfigs {
-		managedNetworks[cfg.Network] = true
+	// Add all configs (managed and manual)
+	for _, cfg := range configs {
 		services = append(services, ServiceStatus{
 			Network:     cfg.Network,
 			Type:        cfg.Type,
@@ -73,7 +71,7 @@ func (m *StatusManager) Update(managedConfigs []ConfigInfo) {
 			TLS:         cfg.TLS,
 			Compression: cfg.Compression,
 			Header:      cfg.Header,
-			Managed:     true,
+			Managed:     cfg.Managed,
 		})
 	}
 
