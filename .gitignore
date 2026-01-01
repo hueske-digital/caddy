@@ -10,6 +10,7 @@
 hosts/internal/*.conf
 hosts/external/*.conf
 hosts/cloudflare/*.conf
+hosts/status.json
 !hosts/*/.gitkeep
 
 # Certificates
