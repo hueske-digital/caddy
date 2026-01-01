@@ -1,0 +1,13 @@
+name: Keep repository active
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keep-active:
+    uses: hueske-digital/actions/.github/workflows/keep-active.yml@main

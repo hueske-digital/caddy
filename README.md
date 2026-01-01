@@ -1,171 +1,139 @@
-# Caddy Proxy with Docker
+# Caddy Reverse Proxy
 
-This repository provides a Docker-based setup for running a Caddy reverse proxy with support for internal, external, and Cloudflare-protected services. It includes automatic configuration reloading and DNS challenge support for SSL certificates.
+Docker-based Caddy reverse proxy with automatic service discovery.
 
-## Features
-
-- Reverse proxy for internal, external, and Cloudflare-protected services.
-- Automatic SSL certificate management using Caddy.
-- DNS challenge support for Cloudflare.
-- Automatic configuration reload on changes.
-- Pre-configured security headers and compression.
-- Modular configuration for easy service management.
-
-## Prerequisites
-
-- Docker and Docker Compose installed on your system.
-- A Cloudflare account (if using DNS challenge for SSL certificates).
-
-## Getting Started
-
-### 1. Clone the Repository
+## Quick Start
 
 ```bash
+# Clone and configure
 git clone https://github.com/hueske-digital/caddy
 cd caddy
-```
-
-### 2. Configure Environment Variables
-
-Copy the `.env.example` file to `.env` and fill in the required values:
-
-```bash
 cp .env.example .env
-```
+# Edit .env with your Cloudflare API token and email
 
-- `CF_API_TOKEN`: Your Cloudflare API token with the following permissions (can be generated using [this link](https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%2C%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%5D&name=Caddy&accountId=*&zoneId=all)):
-  - Zone / Zone / Read
-  - Zone / DNS / Edit
-- `EMAIL`: Your email address for SSL certificate notifications.
-
-### 3. Configure Proxy Hosts
-
-Proxy host configurations are located in the `hosts` directory. Use the provided example files as a starting point:
-
-- Internal services: `hosts/internal/*.example`
-- External services: `hosts/external/*.example`
-- Cloudflare-protected services: `hosts/cloudflare/*.example`
-
-Rename the example files to `.conf` and customize them as needed. For example:
-
-```bash
-mv hosts/external/external.example hosts/external/my-service.conf
-```
-
-### 4. Start the Proxy
-
-Run the following command to start the proxy:
-
-```bash
+# Start
 docker compose up -d
 ```
 
-### 5. Verify Configuration
+## How It Works
 
-Caddy automatically validates and reloads the configuration when changes are detected. Logs can be viewed using:
+The **watcher** sidecar automatically discovers services and generates Caddy configs:
+
+1. Your service joins a `*_caddy` network
+2. Watcher detects it and connects Caddy to that network
+3. Watcher reads `CADDY_*` environment variables from your service
+4. Caddy config is generated and auto-reloaded
+
+## Service Configuration
+
+Add these environment variables to any service:
+
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    environment:
+      - CADDY_DOMAIN=app.example.com        # Required: domain(s), comma-separated
+      - CADDY_TYPE=external                  # Required: external|internal|cloudflare
+      - CADDY_PORT=8080                      # Required: container port
+      - CADDY_ALLOWLIST=home.dyndns.org     # Optional: IP allowlist (external only)
+      - CADDY_LOGGING=true                   # Optional: enable request logging (default: off)
+      - CADDY_TLS=false                      # Optional: disable TLS (default: on)
+      - CADDY_COMPRESSION=false              # Optional: disable compression (default: on)
+      - CADDY_HEADER=false                   # Optional: disable security headers (default: on)
+    networks:
+      - caddy
+
+networks:
+  caddy:
+```
+
+### Types
+
+| Type | Access |
+|------|--------|
+| `external` | Public (or restricted via allowlist) |
+| `internal` | Private IP ranges only (10.x, 172.16-31.x, 192.168.x) |
+| `cloudflare` | Cloudflare IP ranges only |
+
+### Allowlist
+
+Restrict `external` services by IP:
+
+```yaml
+CADDY_ALLOWLIST=home.dyndns.org,office.example.com,1.2.3.4
+```
+
+- Hostnames resolved via DNS-over-HTTPS (Cloudflare/Google)
+- Auto-refreshes every 60 seconds
+- Non-matching requests: connection aborted
+
+## Manual Configs
+
+Place custom `.conf` files in:
+- `hosts/internal/` - internal services
+- `hosts/external/` - public services
+- `hosts/cloudflare/` - Cloudflare-proxied services
+
+Available snippets (defined in `hosts/base.conf`):
+- `(tls)` - Cloudflare DNS challenge
+- `(internal)` - private IP matcher
+- `(cloudflare)` - Cloudflare IP matcher
+- `(compression)` - zstd/gzip
+- `(header)` - security headers
+- `(logging)` - stdout logging
+
+## Status Dashboard
+
+Set `CADDY_DOMAIN` in `.env` to enable the built-in status page. Defaults to `internal` access on port `8080`.
+
+![Status Dashboard](docs/watcher.png)
+
+## Environment Variables
+
+### Required (`.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `CF_API_TOKEN` | Cloudflare API token (Zone Read + DNS Edit) |
+| `EMAIL` | Email for SSL notifications |
+
+### Optional (docker-compose)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NETWORK_SUFFIX` | `_caddy` | Network suffix to watch |
+| `HOSTS_DIR` | `/hosts` | Config output directory |
+| `DNS_REFRESH_INTERVAL` | `60` | Seconds between DNS refreshes |
+
+### Optional (`.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `CADDY_DOMAIN` | Status page domain (enables dashboard) |
+
+## Ports
+
+Required for external access:
+- `80/tcp` - HTTP + Let's Encrypt
+- `443/tcp` - HTTPS
+- `443/udp` - HTTP/3
+
+## Legacy Migration
+
+For existing services using `proxy_apps` network with manual configs:
 
 ```bash
-docker compose logs app -f
+# Create legacy network (if not exists)
+docker network create proxy_apps
 ```
 
-### 6. Open and Forward Required Ports
-
-To allow external access to your services, ensure the following ports are open and forwarded to your Docker machine:  
-- **Port 80 (TCP):** For HTTP traffic and Let's Encrypt challenges.
-- **Port 443 (TCP):** For HTTPS traffic.
-- **Port 443 (UDP):** For HTTP/3 traffic.
-
-## Directory Structure
-
-```
-caddy/
-├── build/
-│   ├── Dockerfile          # Custom Caddy build with plugins
-│   ├── bin/
-│   │   ├── entrypoint.sh   # Entrypoint script for the container
-│   │   └── reload.sh       # Script for automatic config reload
-├── hosts/
-│   ├── base.conf           # Base configuration for Caddy
-│   ├── internal/           # Internal service configurations
-│   ├── external/           # External service configurations
-│   └── cloudflare/         # Cloudflare-protected service configurations
-├── .env.example            # Example environment variables file
-├── docker-compose.yml      # Docker Compose configuration
-└── README.md               # Project documentation
-```
-
-## Configuration Details
-
-### Base Configuration
-
-The `hosts/base.conf` file includes global settings such as:
-
-- Security headers
-- Compression
-- Logging
-- TLS configuration with Cloudflare DNS challenge
-
-### Internal Services
-
-Internal services are accessible only from private IP ranges. Example configuration:
-
-```conf
-https://internal.hueske.services {
-    import internal
-    import tls
-    import header
-
-    handle @internal {
-        reverse_proxy internal-app-1:8080
-    }
-    respond 403
-}
-```
-
-### External Services
-
-External services are publicly accessible. Example configuration:
-
-```conf
-https://external.hueske.services {
-    import tls
-    import compression
-    import header
-
-    reverse_proxy external-app-1:3000
-}
-```
-
-### Cloudflare-Protected Services
-
-Services behind Cloudflare are restricted to Cloudflare IP ranges. Example configuration:
-
-```conf
-https://cloudflare.hueske.services {
-    import cloudflare
-    import tls
-    import compression
-    import header
-
-    handle @cloudflare {
-        reverse_proxy cloudflare-app-1:3001
-    }
-    respond 403
-}
-```
-
-## Plugins
-
-This setup includes the following Caddy plugins:
-
-- [Cloudflare DNS](https://github.com/caddy-dns/cloudflare): For DNS challenge support.
-- [Replace Response](https://github.com/caddyserver/replace-response): For response manipulation.
-
-## Automatic Configuration Reload
-
-The `reload.sh` script monitors the `hosts` directory for changes and reloads the Caddy configuration automatically.
+- Legacy services continue working with manual `.conf` files
+- New services use `*_caddy` networks with auto-discovery
+- Migrate gradually by adding `CADDY_*` env vars
 
 ## Notes
 
-- Ensure that the SSL mode in Cloudflare is set to **Strict**.
-- Use the provided access lists (`internal` and `cloudflare`) to restrict access to services appropriately.
+- Set Cloudflare SSL mode to **Full (strict)**
+- Caddy auto-reloads when configs change
+- Generated configs are gitignored

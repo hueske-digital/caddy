@@ -9,20 +9,40 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - $PWD/.env
+      - .env
     entrypoint: /docker/entrypoint.sh
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
-      - $PWD/hosts:/hosts
+      - ./hosts:/hosts
       - app_data:/data
       - app_conf:/config
     networks:
-      proxy_apps:
+      - proxy_apps
+
+  watcher:
+    image: ghcr.io/hueske-digital/caddy:watcher
+    restart: unless-stopped
+    environment:
+      - COMPOSE_PROJECT_NAME
+      - NETWORK_SUFFIX=${NETWORK_SUFFIX:-_caddy}
+      - HOSTS_DIR=${HOSTS_DIR:-/hosts}
+      - DNS_REFRESH_INTERVAL=${DNS_REFRESH_INTERVAL:-60}
+      # Status page: set CADDY_DOMAIN in .env to enable
+      - CADDY_DOMAIN=${CADDY_DOMAIN:-}
+      - CADDY_TYPE=${CADDY_TYPE:-internal}
+      - CADDY_PORT=${CADDY_PORT:-8080}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./hosts:/hosts
+    networks:
+      - caddy
+
+networks:
+  caddy:
+  # Legacy network for existing services with manual configs
+  proxy_apps:
+    external: true
 
 volumes:
   app_data:
   app_conf:
-
-networks:
-  proxy_apps:
-    name: proxy_apps

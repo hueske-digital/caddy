@@ -1,8 +1,22 @@
+# Environment
 .env
-.idea
-hosts/cloudflare/*.conf
-hosts/external/*.conf
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Generated Caddy configs
 hosts/internal/*.conf
+hosts/external/*.conf
+hosts/cloudflare/*.conf
+!hosts/*/.gitkeep
+
+# Certificates
 *.crt
 *.key
 *.pfx
+*.pem
+
+# Go
+watcher/watcher

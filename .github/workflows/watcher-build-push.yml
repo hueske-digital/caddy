@@ -1,4 +1,4 @@
-name: Build and Push Docker image
+name: Build and Push Watcher image
 
 env:
   IMAGE_NAME: ghcr.io/hueske-digital/caddy
@@ -8,11 +8,8 @@ on:
     branches:
       - main
     paths:
-      - 'build/**'
-      - '.github/workflows/docker-build-push.yml'
-
-  schedule:
-    - cron: '0 0 * * 1'
+      - 'watcher/**'
+      - '.github/workflows/watcher-build-push.yml'
 
   workflow_dispatch:
 
@@ -60,8 +57,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
-          context: ./build
-          tags: ${{ env.IMAGE_NAME }}:${{ steps.platform.outputs.suffix }}
+          context: ./watcher
+          tags: ${{ env.IMAGE_NAME }}:watcher-${{ steps.platform.outputs.suffix }}
           platforms: ${{ matrix.platform }}
 
   manifest:
@@ -81,7 +78,7 @@ jobs:
 
       - name: Create and push manifest
         run: |
-          docker manifest create ${{ env.IMAGE_NAME }}:latest \
-            ${{ env.IMAGE_NAME }}:amd64 \
-            ${{ env.IMAGE_NAME }}:arm64
-          docker manifest push ${{ env.IMAGE_NAME }}:latest
+          docker manifest create ${{ env.IMAGE_NAME }}:watcher \
+            ${{ env.IMAGE_NAME }}:watcher-amd64 \
+            ${{ env.IMAGE_NAME }}:watcher-arm64
+          docker manifest push ${{ env.IMAGE_NAME }}:watcher
