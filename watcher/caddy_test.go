@@ -422,6 +422,53 @@ https://a.example.com, https://b.example.com {
 	}
 }
 
+func TestExtractDomainsFromConfig_MultipleBlocks(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.conf")
+
+	content := `# Multiple server blocks in one file
+https://movies.example.com {
+    import internal
+    handle @internal {
+        reverse_proxy vpn:7878
+    }
+    abort
+}
+
+https://series.example.com {
+    import internal
+    handle @internal {
+        reverse_proxy vpn:8989
+    }
+    abort
+}
+
+https://downloads.example.com {
+    import internal
+    handle @internal {
+        reverse_proxy vpn:8080
+    }
+    abort
+}`
+	os.WriteFile(path, []byte(content), 0644)
+
+	domains := extractDomainsFromConfig(path)
+	if len(domains) != 3 {
+		t.Errorf("expected 3 domains, got %d", len(domains))
+	}
+
+	expected := []string{"movies.example.com", "series.example.com", "downloads.example.com"}
+	for i, exp := range expected {
+		if i >= len(domains) {
+			t.Errorf("missing domain %s", exp)
+			continue
+		}
+		if domains[i] != exp {
+			t.Errorf("expected %s, got %s", exp, domains[i])
+		}
+	}
+}
+
 func TestInvalidType(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
