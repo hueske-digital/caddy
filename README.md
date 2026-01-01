@@ -132,6 +132,54 @@ docker network create proxy_apps
 - New services use `*_caddy` networks with auto-discovery
 - Migrate gradually by adding `CADDY_*` env vars
 
+## Testing
+
+### Unit Tests
+
+```bash
+cd watcher && go test -v ./...
+```
+
+Tests core functionality without Docker:
+- `ParseCaddyEnv` - Environment variable parsing and validation
+- Template generation for all types (internal/external/cloudflare)
+- Config file writing and removal
+- Domain extraction from config files
+- Option handling (logging, TLS, compression, headers)
+
+### Integration Tests
+
+```bash
+./watcher/test/integration.sh
+```
+
+Full end-to-end tests with Docker containers:
+
+| Test | Description |
+|------|-------------|
+| Service start | Creates config when container with `CADDY_*` vars starts |
+| Service stop | Config persists when container stops (not removed) |
+| Service down | Config and network removed on `docker compose down` |
+| External type | Config created in `hosts/external/` |
+| Cloudflare type | Config includes `import cloudflare` directive |
+| Logging option | `CADDY_LOGGING=true` adds `import logging` |
+| Disabled options | `CADDY_TLS/COMPRESSION/HEADER=false` removes imports |
+| Multiple domains | Comma-separated domains all included in config |
+| File ownership | Files created with UID/GID 1000:1000 (Linux only) |
+| Status API | `/api/status` returns valid JSON (if enabled) |
+
+Options:
+```bash
+# Keep caddy stack running after tests (for debugging)
+./watcher/test/integration.sh --keep-stack
+```
+
+The integration tests automatically:
+- Build the watcher image locally
+- Start the caddy stack if not running
+- Clean up test containers and networks
+- Stop the stack after tests (unless `--keep-stack`)
+
 ## Notes
 
 - Set Cloudflare SSL mode to **Full (strict)**
