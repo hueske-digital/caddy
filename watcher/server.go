@@ -12,7 +12,7 @@ const statusHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Proxy Overview</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181b' stroke-width='2'><circle cx='12' cy='12' r='10'/><path d='M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -87,8 +87,8 @@ const statusHTML = `<!DOCTYPE html>
                             <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Domain</th>
                             <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Type</th>
                             <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Allowlist</th>
-                            <th class="text-center text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Options</th>
-                            <th class="text-center text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 w-20">Config</th>
+                            <th class="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3">Options</th>
+                            <th id="config-header" class="text-center text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 w-20">Config</th>
                         </tr>
                     </thead>
                     <tbody id="services" class="divide-y divide-zinc-100"></tbody>
@@ -200,19 +200,25 @@ const statusHTML = `<!DOCTYPE html>
 
             services = services.slice().sort((a, b) => getFirstDomain(a).localeCompare(getFirstDomain(b)));
 
+            const showConfig = !!codeEditorUrl;
+            const colspan = showConfig ? 5 : 4;
+
             if (services.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-zinc-400">No services configured</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="' + colspan + '" class="px-4 py-8 text-center text-zinc-400">No services configured</td></tr>';
             } else {
                 tbody.innerHTML = services.map(svc => ` + "`" + `
                     <tr class="hover:bg-zinc-50/50 transition-colors">
                         <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
                         <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
                         <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).join(', ') || '<span class="text-zinc-300">—</span>'}</td>
-                        <td class="px-4 py-3"><div class="flex items-center justify-center gap-2">${optionIcons(svc)}</div></td>
-                        <td class="px-4 py-3 text-center">${configLink(svc)}</td>
+                        <td class="px-4 py-3"><div class="flex items-center gap-2">${optionIcons(svc)}</div></td>
+                        ${showConfig ? '<td class="config-cell px-4 py-3 text-center">' + configLink(svc) + '</td>' : ''}
                     </tr>
                 ` + "`" + `).join('');
             }
+
+            // Hide/show config column header
+            document.getElementById('config-header').style.display = showConfig ? '' : 'none';
         }
 
         async function loadStatus() {
