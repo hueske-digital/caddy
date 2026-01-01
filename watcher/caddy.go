@@ -125,6 +125,8 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %v", err)
 	}
+	// Set ownership to 1000:1000
+	os.Chown(dir, 1000, 1000)
 
 	// Write atomically via temp file
 	tmpPath := path + ".tmp"
@@ -136,6 +138,8 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 		os.Remove(tmpPath) // Clean up
 		return fmt.Errorf("failed to rename temp file: %v", err)
 	}
+	// Set ownership to 1000:1000
+	os.Chown(path, 1000, 1000)
 
 	// Store config for status reporting
 	m.configs[cfg.Network] = cfg
