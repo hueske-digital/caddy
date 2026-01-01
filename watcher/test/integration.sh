@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+# Usage: ./integration.sh [--keep-stack]
+#   --keep-stack  Don't stop the caddy stack after tests (useful for debugging)
+
+KEEP_STACK=false
+for arg in "$@"; do
+    case $arg in
+        --keep-stack) KEEP_STACK=true ;;
+    esac
+done
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,11 +56,20 @@ cleanup() {
     # Stop test app if running
     if [ -d "$TEST_DIR" ]; then
         cd "$TEST_DIR"
-        docker compose down --volumes --remove-orphans 2>/dev/null || true
+        docker compose -p "$COMPOSE_PROJECT" down --volumes --remove-orphans 2>/dev/null || true
     fi
 
     # Remove test directory
     rm -rf "$TEST_DIR"
+
+    # Stop caddy stack if we started it (unless --keep-stack)
+    if [ "$STARTED_STACK" = true ] && [ "$KEEP_STACK" = false ]; then
+        log_info "Stopping caddy stack (we started it)..."
+        cd "$PROJECT_DIR"
+        docker compose down
+    elif [ "$STARTED_STACK" = true ] && [ "$KEEP_STACK" = true ]; then
+        log_info "Keeping caddy stack running (--keep-stack)"
+    fi
 
     log_info "Cleanup complete"
 }
@@ -58,16 +77,24 @@ cleanup() {
 # Trap to cleanup on exit
 trap cleanup EXIT
 
+# Track if we started the stack
+STARTED_STACK=false
+
 # Setup
 setup() {
     log_info "Setting up test environment..."
     mkdir -p "$TEST_DIR/hosts/internal" "$TEST_DIR/hosts/external" "$TEST_DIR/hosts/cloudflare"
 
-    # Check if caddy watcher is running
+    # Check if caddy watcher is running, if not start it
     if ! docker ps --format '{{.Names}}' | grep -q "caddy.*watcher\|proxy.*watcher"; then
-        echo -e "${RED}ERROR: Caddy watcher container not running${NC}"
-        echo "Please start the caddy stack first: cd $PROJECT_DIR && docker compose up -d"
-        exit 1
+        log_info "Caddy stack not running, starting it..."
+        cd "$PROJECT_DIR"
+        docker compose up -d --wait
+        STARTED_STACK=true
+        sleep 3  # Give watcher time to initialize
+        log_info "Caddy stack started"
+    else
+        log_info "Caddy stack already running"
     fi
 
     log_info "Test environment ready at $TEST_DIR"
