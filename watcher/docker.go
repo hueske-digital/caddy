@@ -393,7 +393,7 @@ func handleContainerEvent(ctx context.Context, event events.Message, docker *Doc
 	}
 
 	if !hasProxyNetwork {
-		log.Printf("Ignoring container %s: not in any *_proxy network", containerName)
+		log.Printf("Ignoring container %s: not in any *%s network", containerName, cfg.NetworkSuffix)
 		return
 	}
 
