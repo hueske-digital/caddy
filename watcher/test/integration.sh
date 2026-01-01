@@ -497,6 +497,134 @@ EOF
     docker compose -p "$COMPOSE_PROJECT" down
 }
 
+test_internal_matcher() {
+    run_test "Internal type has correct matcher"
+
+    cd "$TEST_DIR"
+
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-internal.example.com
+      - CADDY_TYPE=internal
+      - CADDY_PORT=80
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    HOSTS_DIR="$PROJECT_DIR/hosts"
+    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+
+    CONFIG_FILE="$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
+    if grep -q "@internal" "$CONFIG_FILE" && grep -q "import internal" "$CONFIG_FILE"; then
+        log_pass "Config contains @internal matcher and import"
+    else
+        log_fail "Config missing @internal matcher or import"
+        cat "$CONFIG_FILE"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+    sleep 2
+}
+
+test_cloudflare_matcher() {
+    run_test "Cloudflare type has correct matcher"
+
+    cd "$TEST_DIR"
+
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-cf-matcher.example.com
+      - CADDY_TYPE=cloudflare
+      - CADDY_PORT=80
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    HOSTS_DIR="$PROJECT_DIR/hosts"
+    wait_for "[ -f '$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+
+    CONFIG_FILE="$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf"
+    if grep -q "@cloudflare" "$CONFIG_FILE" && grep -q "import cloudflare" "$CONFIG_FILE"; then
+        log_pass "Config contains @cloudflare matcher and import"
+    else
+        log_fail "Config missing @cloudflare matcher or import"
+        cat "$CONFIG_FILE"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+    sleep 2
+}
+
+test_allowlist() {
+    run_test "Allowlist generates IP matcher"
+
+    cd "$TEST_DIR"
+
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-allowlist.example.com
+      - CADDY_TYPE=external
+      - CADDY_PORT=80
+      - CADDY_ALLOWLIST=1.2.3.4,5.6.7.8
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    HOSTS_DIR="$PROJECT_DIR/hosts"
+    wait_for "[ -f '$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+
+    CONFIG_FILE="$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf"
+
+    # Allowlist should create @allowed matcher with remote_ip
+    if grep -q "@allowed" "$CONFIG_FILE"; then
+        log_pass "Config contains @allowed matcher"
+    else
+        log_fail "Config missing @allowed matcher"
+        cat "$CONFIG_FILE"
+    fi
+
+    # Should contain remote_ip directive
+    if grep -q "remote_ip" "$CONFIG_FILE"; then
+        log_pass "Config contains remote_ip directive"
+    else
+        log_fail "Config missing remote_ip directive"
+        cat "$CONFIG_FILE"
+    fi
+
+    # Should contain the IPs (if resolved, otherwise may fall back)
+    if grep -q "1.2.3.4" "$CONFIG_FILE" && grep -q "5.6.7.8" "$CONFIG_FILE"; then
+        log_pass "Config contains allowlist IPs"
+    else
+        # IPs are direct, so they should be there
+        log_fail "Config missing allowlist IPs"
+        cat "$CONFIG_FILE"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+    sleep 2
+}
+
 test_status_api() {
     run_test "Status API returns JSON"
 
@@ -574,6 +702,9 @@ main() {
     test_disabled_options
     test_multiple_domains
     test_file_ownership
+    test_internal_matcher
+    test_cloudflare_matcher
+    test_allowlist
     test_status_api
 
     # Summary

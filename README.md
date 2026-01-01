@@ -166,6 +166,9 @@ Full end-to-end tests with Docker containers:
 | Disabled options | `CADDY_TLS/COMPRESSION/HEADER=false` removes imports |
 | Multiple domains | Comma-separated domains all included in config |
 | File ownership | Files created with UID/GID 1000:1000 (Linux only) |
+| Internal matcher | Config contains `@internal` matcher for private IPs |
+| Cloudflare matcher | Config contains `@cloudflare` matcher for CF IPs |
+| Allowlist | `CADDY_ALLOWLIST` creates `@allowed` matcher with IPs |
 | Status API | `/api/status` returns valid JSON (if enabled) |
 
 Options:
@@ -179,6 +182,16 @@ The integration tests automatically:
 - Start the caddy stack if not running
 - Clean up test containers and networks
 - Stop the stack after tests (unless `--keep-stack`)
+
+### Pre-Push Hook
+
+Enable automatic testing before push:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This runs unit tests before every `git push`. If tests fail, push is aborted.
 
 ## Notes
 

@@ -1,0 +1,21 @@
+#!/bin/bash
+# Pre-push hook: Run tests before pushing
+
+echo "Running unit tests..."
+cd watcher && go test ./...
+if [ $? -ne 0 ]; then
+    echo "❌ Unit tests failed. Push aborted."
+    exit 1
+fi
+
+echo "✅ Unit tests passed."
+
+# Optional: Run integration tests (uncomment if desired)
+# echo "Running integration tests..."
+# cd .. && ./watcher/test/integration.sh
+# if [ $? -ne 0 ]; then
+#     echo "❌ Integration tests failed. Push aborted."
+#     exit 1
+# fi
+
+exit 0
