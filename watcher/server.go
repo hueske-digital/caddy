@@ -41,8 +41,9 @@ const statusHTML = `<!DOCTYPE html>
         table tbody tr:nth-child(even) td { background: #f1f5f9 !important; }
         .filters { margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center; }
         .filters span { font-size: 0.9rem; color: var(--pico-muted-color); }
-        .filter-btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; cursor: pointer; border-radius: var(--pico-border-radius); border: 1px solid var(--pico-muted-border-color); background: var(--pico-background-color); }
-        .filter-btn.active { background: var(--pico-primary); color: var(--pico-primary-inverse); border-color: var(--pico-primary); }
+        .filter-btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; cursor: pointer; border-radius: var(--pico-border-radius); border: 1px solid var(--pico-muted-border-color) !important; background: var(--pico-background-color) !important; color: var(--pico-color) !important; transition: all 0.2s; }
+        .filter-btn:hover { border-color: var(--pico-primary) !important; }
+        .filter-btn.active { background: var(--pico-primary) !important; color: var(--pico-primary-inverse) !important; border-color: var(--pico-primary) !important; }
     </style>
 </head>
 <body>
