@@ -161,6 +161,15 @@ func (d *DockerClient) GetContainerName(containerID string) (string, error) {
 	return strings.TrimPrefix(inspect.Name, "/"), nil
 }
 
+// GetContainerNameAndStatus returns the name of a container and whether it still exists
+func (d *DockerClient) GetContainerNameAndStatus(containerID string) (string, bool) {
+	inspect, err := d.cli.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimPrefix(inspect.Name, "/"), true
+}
+
 // WatchEvents starts watching Docker events and calls the handler for each relevant event
 func (d *DockerClient) WatchEvents(ctx context.Context) (<-chan events.Message, <-chan error) {
 	filterArgs := filters.NewArgs()
@@ -263,9 +272,9 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 	case "disconnect":
 		containerID := event.Actor.Attributes["container"]
 
-		// Try to resolve container name from ID (might fail if container is gone)
-		containerName, err := docker.GetContainerName(containerID)
-		if err != nil {
+		// Try to resolve container name and check if it still exists
+		containerName, containerExists := docker.GetContainerNameAndStatus(containerID)
+		if containerName == "" {
 			// Container is gone, use short ID for logging
 			if len(containerID) > 12 {
 				containerName = containerID[:12]
@@ -280,6 +289,12 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		}
 
 		log.Printf("Container %s disconnected from network: %s", containerName, networkName)
+
+		// If container still exists (just stopped), don't cleanup - user might start it again
+		if containerExists {
+			log.Printf("Container %s still exists (stopped), keeping network %s", containerName, networkName)
+			return
+		}
 
 		// Check if any non-Caddy containers remain in this network
 		containers, err := docker.GetNetworkContainers(networkName)
