@@ -12,7 +12,7 @@ services:
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
       # Caddy auto-discovery
       - CADDY_DOMAIN=${TINYAUTH_DOMAIN}
-      - CADDY_TYPE=${TINYAUTH_TYPE:-internal}
+      - CADDY_TYPE=${TINYAUTH_TYPE:-external}
       - CADDY_PORT=3000
     networks:
       - caddy
