@@ -344,9 +344,76 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 }
 
 func handleContainerEvent(ctx context.Context, event events.Message, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
-	if event.Action != "start" {
+	switch event.Action {
+	case "start":
+		handleContainerStart(ctx, event, docker, caddyMgr, statusMgr, cfg)
+	case "destroy":
+		handleContainerDestroy(ctx, event, docker, caddyMgr, statusMgr, cfg)
+	}
+}
+
+func handleContainerDestroy(ctx context.Context, event events.Message, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
+	containerName := event.Actor.Attributes["name"]
+
+	// Ignore Caddy container
+	if containerName == cfg.CaddyContainer {
 		return
 	}
+
+	log.Printf("Container %s was removed, checking for orphaned networks...", containerName)
+
+	// Check all proxy networks to see if they're now empty (except for Caddy)
+	networks, err := docker.ListProxyNetworks(cfg.NetworkSuffix)
+	if err != nil {
+		log.Printf("Failed to list networks: %v", err)
+		return
+	}
+
+	for _, networkName := range networks {
+		containers, err := docker.GetNetworkContainers(networkName)
+		if err != nil {
+			continue
+		}
+
+		// Check if only Caddy (or no containers) remain
+		hasOtherContainers := false
+		for _, c := range containers {
+			for _, name := range c.Names {
+				if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
+					hasOtherContainers = true
+					break
+				}
+			}
+			if hasOtherContainers {
+				break
+			}
+		}
+
+		if !hasOtherContainers {
+			log.Printf("Network %s has no service containers after %s removal, cleaning up", networkName, containerName)
+
+			// Disconnect Caddy from network
+			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
+				log.Printf("Failed to disconnect from %s: %v", networkName, err)
+			}
+
+			// Remove the network
+			if err := docker.RemoveNetwork(networkName); err != nil {
+				log.Printf("Failed to remove network %s: %v", networkName, err)
+			}
+
+			// Remove config for this network
+			if err := caddyMgr.RemoveConfig(networkName); err != nil {
+				log.Printf("Failed to remove config for %s: %v", networkName, err)
+			}
+
+			// Update status
+			statusMgr.Update(caddyMgr.ListConfigs())
+		}
+	}
+}
+
+func handleContainerStart(ctx context.Context, event events.Message, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
 
 	containerName := event.Actor.Attributes["name"]
 
