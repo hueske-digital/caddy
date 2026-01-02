@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -13,6 +14,60 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
+
+// cleanupScheduler manages delayed network cleanup with cancellation support
+type cleanupScheduler struct {
+	mu       sync.Mutex
+	timers   map[string]*time.Timer // network -> cleanup timer
+	cleanups map[string]func()      // network -> cleanup function
+}
+
+var scheduler = &cleanupScheduler{
+	timers:   make(map[string]*time.Timer),
+	cleanups: make(map[string]func()),
+}
+
+// Schedule schedules a cleanup for a network after delay
+// If a cleanup is already scheduled, it's replaced
+func (s *cleanupScheduler) Schedule(networkName string, delay time.Duration, cleanup func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Cancel existing timer if any
+	if timer, exists := s.timers[networkName]; exists {
+		timer.Stop()
+	}
+
+	s.cleanups[networkName] = cleanup
+	s.timers[networkName] = time.AfterFunc(delay, func() {
+		s.mu.Lock()
+		delete(s.timers, networkName)
+		fn := s.cleanups[networkName]
+		delete(s.cleanups, networkName)
+		s.mu.Unlock()
+
+		if fn != nil {
+			fn()
+		}
+	})
+
+	log.Printf("Scheduled cleanup for %s in %v", networkName, delay)
+}
+
+// Cancel cancels a scheduled cleanup for a network
+func (s *cleanupScheduler) Cancel(networkName string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if timer, exists := s.timers[networkName]; exists {
+		timer.Stop()
+		delete(s.timers, networkName)
+		delete(s.cleanups, networkName)
+		log.Printf("Cancelled scheduled cleanup for %s", networkName)
+		return true
+	}
+	return false
+}
 
 // DockerClient wraps the Docker API client
 type DockerClient struct {
@@ -259,6 +314,9 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 			return
 		}
 
+		// Cancel any scheduled cleanup for this network (e.g., from force-recreate)
+		scheduler.Cancel(networkName)
+
 		log.Printf("Container %s connected to network: %s", containerName, networkName)
 
 		// Generate configs for containers in this network (with retry)
@@ -348,8 +406,7 @@ func handleContainerEvent(ctx context.Context, event events.Message, docker *Doc
 	case "start":
 		handleContainerStart(ctx, event, docker, caddyMgr, statusMgr, cfg)
 	case "destroy":
-		// Run async with delay to avoid blocking and allow new containers to start
-		go handleContainerDestroy(ctx, event, docker, caddyMgr, statusMgr, cfg)
+		handleContainerDestroy(ctx, event, docker, caddyMgr, statusMgr, cfg)
 	}
 }
 
@@ -371,58 +428,54 @@ func handleContainerDestroy(ctx context.Context, event events.Message, docker *D
 	// Only check the network that matches this container's project
 	expectedNetwork := projectName + cfg.NetworkSuffix
 
-	// Wait a bit before checking - during docker compose up --force-recreate,
-	// the old container is destroyed before the new one connects to the network.
-	// This grace period allows the new container to connect first.
-	select {
-	case <-time.After(3 * time.Second):
-	case <-ctx.Done():
-		return
-	}
+	// Schedule cleanup with delay - can be cancelled if new container connects
+	// This handles docker compose up --force-recreate where old container is
+	// destroyed before the new one connects
+	scheduler.Schedule(expectedNetwork, 3*time.Second, func() {
+		log.Printf("Container %s was removed, checking network %s...", containerName, expectedNetwork)
 
-	log.Printf("Container %s was removed, checking network %s...", containerName, expectedNetwork)
+		containers, err := docker.GetNetworkContainers(expectedNetwork)
+		if err != nil {
+			// Network might not exist or already be gone
+			return
+		}
 
-	containers, err := docker.GetNetworkContainers(expectedNetwork)
-	if err != nil {
-		// Network might not exist or already be gone
-		return
-	}
-
-	// Check if only Caddy (or no containers) remain
-	hasOtherContainers := false
-	for _, c := range containers {
-		for _, name := range c.Names {
-			if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
-				hasOtherContainers = true
+		// Check if only Caddy (or no containers) remain
+		hasOtherContainers := false
+		for _, c := range containers {
+			for _, name := range c.Names {
+				if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
+					hasOtherContainers = true
+					break
+				}
+			}
+			if hasOtherContainers {
 				break
 			}
 		}
-		if hasOtherContainers {
-			break
+
+		if !hasOtherContainers {
+			log.Printf("Network %s has no service containers after %s removal, cleaning up", expectedNetwork, containerName)
+
+			// Disconnect Caddy from network
+			if err := docker.DisconnectFromNetwork(expectedNetwork, cfg.CaddyContainer); err != nil {
+				log.Printf("Failed to disconnect from %s: %v", expectedNetwork, err)
+			}
+
+			// Remove the network
+			if err := docker.RemoveNetwork(expectedNetwork); err != nil {
+				log.Printf("Failed to remove network %s: %v", expectedNetwork, err)
+			}
+
+			// Remove config for this network
+			if err := caddyMgr.RemoveConfig(expectedNetwork); err != nil {
+				log.Printf("Failed to remove config for %s: %v", expectedNetwork, err)
+			}
+
+			// Update status
+			statusMgr.Update(caddyMgr.ListConfigs())
 		}
-	}
-
-	if !hasOtherContainers {
-		log.Printf("Network %s has no service containers after %s removal, cleaning up", expectedNetwork, containerName)
-
-		// Disconnect Caddy from network
-		if err := docker.DisconnectFromNetwork(expectedNetwork, cfg.CaddyContainer); err != nil {
-			log.Printf("Failed to disconnect from %s: %v", expectedNetwork, err)
-		}
-
-		// Remove the network
-		if err := docker.RemoveNetwork(expectedNetwork); err != nil {
-			log.Printf("Failed to remove network %s: %v", expectedNetwork, err)
-		}
-
-		// Remove config for this network
-		if err := caddyMgr.RemoveConfig(expectedNetwork); err != nil {
-			log.Printf("Failed to remove config for %s: %v", expectedNetwork, err)
-		}
-
-		// Update status
-		statusMgr.Update(caddyMgr.ListConfigs())
-	}
+	})
 }
 
 // extractProjectName extracts the Docker Compose project name from a container name
