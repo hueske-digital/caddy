@@ -16,3 +16,6 @@ services:
       - CADDY_PORT=3000
     networks:
       - caddy
+
+networks:
+  caddy:
