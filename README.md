@@ -12,8 +12,18 @@ cp .env.example .env
 # Edit .env with your Cloudflare API token and email
 
 # Start
-docker compose up -d
+make up
 ```
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `make up` | Start Caddy only |
+| `make up-auth` | Start Caddy + TinyAuth |
+| `make up-all` | Start all services |
+| `make down` | Stop Caddy |
+| `make logs` | Follow logs |
 
 ## How It Works
 
