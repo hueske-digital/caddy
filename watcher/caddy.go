@@ -147,8 +147,8 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 			imports = append(imports, generatePathBasedAuth(cfg.AuthPaths))
 		}
 	}
-	if cfg.SEO {
-		imports = append(imports, "    import seo")
+	if !cfg.SEO {
+		imports = append(imports, "    import noindex")
 	}
 	if cfg.Performance {
 		imports = append(imports, "    import performance")

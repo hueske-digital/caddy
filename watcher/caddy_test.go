@@ -623,6 +623,7 @@ func TestWriteConfig_WithSEO(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
 
+	// SEO=true means indexable (no noindex import)
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
 		Container:   "test-container",
@@ -646,8 +647,41 @@ func TestWriteConfig_WithSEO(t *testing.T) {
 		t.Fatalf("failed to read config: %v", err)
 	}
 
-	if !strings.Contains(string(content), "import seo") {
-		t.Error("expected import seo when SEO is true")
+	if strings.Contains(string(content), "import noindex") {
+		t.Error("expected NO import noindex when SEO is true")
+	}
+}
+
+func TestWriteConfig_WithoutSEO(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	// SEO=false (default) means not indexable (has noindex import)
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		SEO:         false,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !strings.Contains(string(content), "import noindex") {
+		t.Error("expected import noindex when SEO is false")
 	}
 }
 

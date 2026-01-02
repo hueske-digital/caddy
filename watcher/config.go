@@ -56,7 +56,7 @@ type CaddyConfig struct {
 	Header      bool     // From CADDY_HEADER (optional, default true)
 	Auth        bool     // From CADDY_AUTH (optional, default false)
 	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
-	SEO         bool     // From CADDY_SEO (optional, default false)
+	SEO         bool     // From CADDY_SEO (optional, default false = noindex)
 	WWWRedirect bool     // From CADDY_WWW_REDIRECT (optional, default false)
 	Performance bool     // From CADDY_PERFORMANCE (optional, default true)
 	Security    bool     // From CADDY_SECURITY (optional, default true)
@@ -177,7 +177,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	compression := env["CADDY_COMPRESSION"] != "false" // default: on
 	header := env["CADDY_HEADER"] != "false"           // default: on
 	auth := env["CADDY_AUTH"] == "true"                 // default: off
-	seo := env["CADDY_SEO"] == "true"                   // default: off
+	seo := env["CADDY_SEO"] == "true"                   // default: off (= noindex)
 	wwwRedirect := env["CADDY_WWW_REDIRECT"] == "true" // default: off
 	performance := env["CADDY_PERFORMANCE"] != "false" // default: on
 	security := env["CADDY_SECURITY"] != "false"       // default: on
