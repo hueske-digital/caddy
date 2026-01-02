@@ -8,6 +8,8 @@ services:
       - "443:443/udp"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      - COMPOSE_PROJECT_NAME
     env_file:
       - .env
     entrypoint: /docker/entrypoint.sh
