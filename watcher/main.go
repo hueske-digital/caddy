@@ -7,7 +7,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 )
 
 func main() {
@@ -185,40 +184,3 @@ func regenerateConfigForNetwork(ctx context.Context, docker *DockerClient, caddy
 	return generateConfigsForNetwork(ctx, docker, caddyMgr, network, cfg)
 }
 
-func generateConfigsForNetworkWithRetry(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManager, network string, cfg *Config) error {
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		containers, err := docker.GetNetworkContainers(network)
-		if err != nil {
-			lastErr = err
-			select {
-			case <-time.After(500 * time.Millisecond):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			continue
-		}
-
-		// If we found containers, process them
-		if len(containers) > 0 {
-			return generateConfigsForNetwork(ctx, docker, caddyMgr, network, cfg)
-		}
-
-		// No containers yet, retry
-		if i < maxRetries-1 {
-			select {
-			case <-time.After(500 * time.Millisecond):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-
-	// Final attempt
-	if lastErr != nil {
-		return lastErr
-	}
-	return generateConfigsForNetwork(ctx, docker, caddyMgr, network, cfg)
-}

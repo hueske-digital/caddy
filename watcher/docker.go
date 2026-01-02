@@ -290,18 +290,10 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 	case "create":
 		log.Printf("New network detected: %s", networkName)
 
-		// Connect Caddy to network
+		// Connect Caddy to network (configs are generated via network:connect event)
 		if err := docker.ConnectToNetwork(networkName, cfg.CaddyContainer); err != nil {
 			log.Printf("Failed to connect to %s: %v", networkName, err)
 		}
-
-		// Generate configs for containers in this network (with retry)
-		if err := generateConfigsForNetworkWithRetry(ctx, docker, caddyMgr, networkName, cfg); err != nil {
-			log.Printf("Failed to generate config for %s: %v", networkName, err)
-		}
-
-		// Update status
-		statusMgr.Update(caddyMgr.ListConfigs())
 
 	case "destroy":
 		log.Printf("Network removed: %s", networkName)
@@ -333,8 +325,8 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 
 		log.Printf("Container %s connected to network: %s", containerName, networkName)
 
-		// Generate configs for containers in this network (with retry)
-		if err := generateConfigsForNetworkWithRetry(ctx, docker, caddyMgr, networkName, cfg); err != nil {
+		// Generate config for this container
+		if err := generateConfigsForNetwork(ctx, docker, caddyMgr, networkName, cfg); err != nil {
 			log.Printf("Failed to generate config for %s: %v", networkName, err)
 		}
 
