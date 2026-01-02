@@ -90,6 +90,14 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Check if type changed - delete old config file if so
+	if oldCfg, exists := m.configs[cfg.ConfigKey()]; exists && oldCfg.Type != cfg.Type {
+		oldPath := filepath.Join(m.hostsDir, oldCfg.Type, cfg.ConfigKey()+".conf")
+		if err := os.Remove(oldPath); err == nil {
+			log.Printf("Removed old config (type changed): %s/%s.conf", oldCfg.Type, cfg.ConfigKey())
+		}
+	}
+
 	// Get template for this type
 	tmpl, ok := templates[cfg.Type]
 	if !ok {
@@ -178,8 +186,9 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	// Set ownership to 1000:1000
 	os.Chown(path, 1000, 1000)
 
-	// Store config for status reporting
-	m.configs[cfg.ConfigKey()] = cfg
+	// Store a copy of config for status reporting (not pointer to avoid mutation issues)
+	cfgCopy := *cfg
+	m.configs[cfg.ConfigKey()] = &cfgCopy
 
 	return nil
 }

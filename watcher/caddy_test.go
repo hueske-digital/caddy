@@ -361,6 +361,51 @@ func TestRemoveConfig_NonExistent(t *testing.T) {
 	}
 }
 
+func TestWriteConfig_TypeChange(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	// Create initial config as internal
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	internalPath := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	if _, err := os.Stat(internalPath); os.IsNotExist(err) {
+		t.Fatal("expected internal config file to exist")
+	}
+
+	// Change type to external
+	cfg.Type = "external"
+	err = mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Old internal file should be removed
+	if _, err := os.Stat(internalPath); !os.IsNotExist(err) {
+		t.Error("expected old internal config file to be removed")
+	}
+
+	// New external file should exist
+	externalPath := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	if _, err := os.Stat(externalPath); os.IsNotExist(err) {
+		t.Fatal("expected external config file to exist")
+	}
+}
+
 func TestListConfigs(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
