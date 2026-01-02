@@ -207,20 +207,6 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			auth:        true,
 		},
 		{
-			name: "auth groups implies auth",
-			env: map[string]string{
-				"CADDY_DOMAIN":      "test.example.com",
-				"CADDY_TYPE":        "external",
-				"CADDY_PORT":        "80",
-				"CADDY_AUTH_GROUPS": "admins,editors",
-			},
-			logging:     false,
-			tls:         true,
-			compression: true,
-			header:      true,
-			auth:        true, // auto-enabled by groups
-		},
-		{
 			name: "all disabled",
 			env: map[string]string{
 				"CADDY_DOMAIN":      "test.example.com",

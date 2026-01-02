@@ -15,7 +15,6 @@ var templates = map[string]string{
 
 {{DOMAINS}} {
 {{IMPORTS}}
-{{AUTH_GROUPS_BLOCK}}
 {{ALLOWLIST_BLOCK}}
 }
 `,
@@ -26,7 +25,7 @@ var templates = map[string]string{
     import internal
 
     handle @internal {
-{{HANDLE_CONTENT}}
+        reverse_proxy {{UPSTREAM}}
     }
     abort
 }
@@ -38,7 +37,7 @@ var templates = map[string]string{
     import cloudflare
 
     handle @cloudflare {
-{{HANDLE_CONTENT}}
+        reverse_proxy {{UPSTREAM}}
     }
     abort
 }
@@ -102,7 +101,6 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	content = strings.ReplaceAll(content, "{{UPSTREAM}}", cfg.Upstream)
 
 	// Generate imports block
-	// Note: don't import auth if auth_groups is set (we inline forward_auth in that case)
 	var imports []string
 	if cfg.Logging {
 		imports = append(imports, "    import logging")
@@ -117,23 +115,11 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 		imports = append(imports, "    import header")
 	}
 	if cfg.Auth {
-		// For external: always import auth (directive ordering works)
-		// For internal/cloudflare with auth_groups: skip (we inline forward_auth in route block)
-		if cfg.Type == "external" || len(cfg.AuthGroups) == 0 {
-			imports = append(imports, "    import auth")
-		}
+		imports = append(imports, "    import auth")
 	}
 	content = strings.ReplaceAll(content, "{{IMPORTS}}", strings.Join(imports, "\n"))
 
-	// Handle auth groups placeholder (only for external type)
-	authGroupsBlock := m.generateAuthGroupsBlock(cfg)
-	content = strings.ReplaceAll(content, "{{AUTH_GROUPS_BLOCK}}", authGroupsBlock)
-
-	// Handle content inside handle blocks (for internal/cloudflare types)
-	handleContent := m.generateHandleContent(cfg)
-	content = strings.ReplaceAll(content, "{{HANDLE_CONTENT}}", handleContent)
-
-	// Handle allowlist placeholder
+	// Handle allowlist placeholder (external type only)
 	allowlistBlock := m.generateAllowlistBlock(cfg)
 	content = strings.ReplaceAll(content, "{{ALLOWLIST_BLOCK}}", allowlistBlock)
 
@@ -210,43 +196,6 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
         reverse_proxy %s
     }
     abort`, ipList, cfg.Upstream)
-}
-
-// generateAuthGroupsBlock generates the auth groups check block for external type
-// Note: internal/cloudflare use generateHandleContent with route block for proper ordering
-func (m *CaddyManager) generateAuthGroupsBlock(cfg *CaddyConfig) string {
-	// Only for external type - internal/cloudflare use generateHandleContent
-	if cfg.Type != "external" || len(cfg.AuthGroups) == 0 {
-		return ""
-	}
-
-	// For external type, Caddy's default directive ordering works:
-	// forward_auth runs first (from import auth), then respond checks the header
-	groupPattern := strings.Join(cfg.AuthGroups, "|")
-	return fmt.Sprintf(`
-    @unauthorized_group not header_regexp Remote-Groups "(^|,)(%s)($|,)"
-    respond @unauthorized_group "Forbidden - group not allowed" 403`, groupPattern)
-}
-
-// generateHandleContent generates content inside handle blocks for internal/cloudflare types
-func (m *CaddyManager) generateHandleContent(cfg *CaddyConfig) string {
-	// If auth_groups is set, we need to inline forward_auth in a route block
-	// to ensure the group check happens AFTER forward_auth sets the header
-	if len(cfg.AuthGroups) > 0 {
-		groupPattern := strings.Join(cfg.AuthGroups, "|")
-		return fmt.Sprintf(`        route {
-            forward_auth {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000 {
-                uri /api/auth/caddy
-                copy_headers Remote-User Remote-Email Remote-Groups
-            }
-            @unauthorized_group not header_regexp Remote-Groups "(^|,)(%s)($|,)"
-            respond @unauthorized_group "Forbidden - group not allowed" 403
-            reverse_proxy %s
-        }`, groupPattern, cfg.Upstream)
-	}
-
-	// No auth_groups - just reverse_proxy (auth import handles forward_auth if enabled)
-	return fmt.Sprintf("        reverse_proxy %s", cfg.Upstream)
 }
 
 // RemoveConfig removes all Caddyfile configurations for a network

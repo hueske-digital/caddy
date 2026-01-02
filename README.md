@@ -48,7 +48,6 @@ services:
       - CADDY_PORT=8080                      # Required: container port
       - CADDY_ALLOWLIST=home.dyndns.org     # Optional: IP allowlist (external only)
       - CADDY_AUTH=true                      # Optional: enable forward auth (default: off)
-      - CADDY_AUTH_GROUPS=admins,editors    # Optional: restrict to OIDC groups
       - CADDY_LOGGING=true                   # Optional: enable request logging (default: off)
       - CADDY_TLS=false                      # Optional: disable TLS (default: on)
       - CADDY_COMPRESSION=false              # Optional: disable compression (default: on)

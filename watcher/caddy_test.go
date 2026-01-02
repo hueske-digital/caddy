@@ -261,56 +261,6 @@ func TestWriteConfig_WithAuth(t *testing.T) {
 	}
 }
 
-func TestWriteConfig_WithAuthGroups(t *testing.T) {
-	tmpDir := t.TempDir()
-	mgr := NewCaddyManager(tmpDir, nil)
-
-	cfg := &CaddyConfig{
-		Network:     "test_caddy",
-		Container:   "test-container",
-		Domains:     []string{"test.example.com"},
-		Type:        "internal",
-		Upstream:    "test-container:80",
-		TLS:         true,
-		Compression: true,
-		Header:      true,
-		Auth:        true,
-		AuthGroups:  []string{"admins", "editors"},
-	}
-
-	err := mgr.WriteConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read config: %v", err)
-	}
-
-	contentStr := string(content)
-	// When auth_groups is set, we inline forward_auth instead of import auth
-	if strings.Contains(contentStr, "import auth") {
-		t.Error("expected NO import auth when auth_groups is set")
-	}
-	if !strings.Contains(contentStr, "forward_auth") {
-		t.Error("expected inline forward_auth")
-	}
-	if !strings.Contains(contentStr, "route {") {
-		t.Error("expected route block for ordering")
-	}
-	if !strings.Contains(contentStr, "@unauthorized_group") {
-		t.Error("expected @unauthorized_group matcher")
-	}
-	if !strings.Contains(contentStr, "admins|editors") {
-		t.Error("expected groups pattern")
-	}
-	if !strings.Contains(contentStr, "Forbidden") {
-		t.Error("expected Forbidden response")
-	}
-}
-
 func TestWriteConfig_DisabledOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
