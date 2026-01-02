@@ -68,6 +68,18 @@ const statusHTML = `<!DOCTYPE html>
             <p class="text-sm text-zinc-500 mt-1" id="updated">Loading...</p>
         </div>
 
+        <!-- Wildcard Domains -->
+        <div id="wildcards" class="hidden mb-6">
+            <div class="bg-white rounded-xl border border-zinc-200 p-4 shadow-sm">
+                <div class="flex items-center gap-2 mb-2">
+                    <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                    <span class="text-sm font-medium text-zinc-700">Wildcard Certificates</span>
+                    <span class="text-xs text-zinc-400">(subdomains not exposed in CT logs)</span>
+                </div>
+                <div id="wildcard-list" class="flex flex-wrap gap-2"></div>
+            </div>
+        </div>
+
         <!-- Filters -->
         <div class="flex items-center gap-2 mb-6">
             <span class="text-sm text-zinc-500">Filter:</span>
@@ -224,13 +236,28 @@ const statusHTML = `<!DOCTYPE html>
             document.getElementById('config-header').style.display = showConfig ? '' : 'none';
         }
 
+        function renderWildcards(domains) {
+            const container = document.getElementById('wildcards');
+            const list = document.getElementById('wildcard-list');
+            if (!domains || domains.length === 0) {
+                container.classList.add('hidden');
+                return;
+            }
+            container.classList.remove('hidden');
+            list.innerHTML = domains.map(d =>
+                '<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-mono bg-amber-50 text-amber-700 border border-amber-200">*.' + d + '</span>'
+            ).join('');
+        }
+
         async function loadStatus() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 document.getElementById('updated').textContent = 'Updated ' + new Date(data.updated).toLocaleString();
-                allServices = data.services || [];
+                // Filter out wildcard configs (they're shown separately)
+                allServices = (data.services || []).filter(s => !s.configPath || !s.configPath.includes('_wildcard_'));
                 codeEditorUrl = data.codeEditorUrl || '';
+                renderWildcards(data.wildcardDomains);
                 renderServices();
             } catch (err) {
                 document.getElementById('updated').textContent = 'Error: ' + err.message;
