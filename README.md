@@ -91,7 +91,8 @@ Available snippets (defined in `hosts/base.conf`):
 - `(internal)` - private IP matcher
 - `(cloudflare)` - Cloudflare IP matcher
 - `(compression)` - zstd/gzip
-- `(header)` - security headers
+- `(header)` - security headers (blocks indexing by default)
+- `(seo)` - allow search engine indexing (removes X-Robots-Tag)
 - `(logging)` - stdout logging
 - `(auth)` - forward auth (requires tinyauth)
 

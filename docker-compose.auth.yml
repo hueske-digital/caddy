@@ -20,6 +20,7 @@ services:
       - CADDY_DOMAIN=${TINYAUTH_DOMAIN}
       - CADDY_TYPE=${TINYAUTH_TYPE:-external}
       - CADDY_PORT=3000
+      - DISABLE_ANALYTICS=true
     networks:
       - caddy
 
