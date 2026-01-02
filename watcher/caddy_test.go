@@ -290,8 +290,15 @@ func TestWriteConfig_WithAuthGroups(t *testing.T) {
 	}
 
 	contentStr := string(content)
-	if !strings.Contains(contentStr, "import auth") {
-		t.Error("expected import auth")
+	// When auth_groups is set, we inline forward_auth instead of import auth
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("expected NO import auth when auth_groups is set")
+	}
+	if !strings.Contains(contentStr, "forward_auth") {
+		t.Error("expected inline forward_auth")
+	}
+	if !strings.Contains(contentStr, "route {") {
+		t.Error("expected route block for ordering")
 	}
 	if !strings.Contains(contentStr, "@unauthorized_group") {
 		t.Error("expected @unauthorized_group matcher")
