@@ -348,7 +348,8 @@ func handleContainerEvent(ctx context.Context, event events.Message, docker *Doc
 	case "start":
 		handleContainerStart(ctx, event, docker, caddyMgr, statusMgr, cfg)
 	case "destroy":
-		handleContainerDestroy(ctx, event, docker, caddyMgr, statusMgr, cfg)
+		// Run async with delay to avoid blocking and allow new containers to start
+		go handleContainerDestroy(ctx, event, docker, caddyMgr, statusMgr, cfg)
 	}
 }
 
@@ -360,57 +361,91 @@ func handleContainerDestroy(ctx context.Context, event events.Message, docker *D
 		return
 	}
 
-	log.Printf("Container %s was removed, checking for orphaned networks...", containerName)
-
-	// Check all proxy networks to see if they're now empty (except for Caddy)
-	networks, err := docker.ListProxyNetworks(cfg.NetworkSuffix)
-	if err != nil {
-		log.Printf("Failed to list networks: %v", err)
+	// Extract project name from container name (e.g., "myproject-app-1" -> "myproject")
+	// Docker Compose names containers as: {project}_{service}_{instance} or {project}-{service}-{instance}
+	projectName := extractProjectName(containerName)
+	if projectName == "" {
 		return
 	}
 
-	for _, networkName := range networks {
-		containers, err := docker.GetNetworkContainers(networkName)
-		if err != nil {
-			continue
-		}
+	// Only check the network that matches this container's project
+	expectedNetwork := projectName + cfg.NetworkSuffix
 
-		// Check if only Caddy (or no containers) remain
-		hasOtherContainers := false
-		for _, c := range containers {
-			for _, name := range c.Names {
-				if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
-					hasOtherContainers = true
-					break
-				}
-			}
-			if hasOtherContainers {
+	// Wait a bit before checking - during docker compose up --force-recreate,
+	// the old container is destroyed before the new one connects to the network.
+	// This grace period allows the new container to connect first.
+	select {
+	case <-time.After(3 * time.Second):
+	case <-ctx.Done():
+		return
+	}
+
+	log.Printf("Container %s was removed, checking network %s...", containerName, expectedNetwork)
+
+	containers, err := docker.GetNetworkContainers(expectedNetwork)
+	if err != nil {
+		// Network might not exist or already be gone
+		return
+	}
+
+	// Check if only Caddy (or no containers) remain
+	hasOtherContainers := false
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
+				hasOtherContainers = true
 				break
 			}
 		}
-
-		if !hasOtherContainers {
-			log.Printf("Network %s has no service containers after %s removal, cleaning up", networkName, containerName)
-
-			// Disconnect Caddy from network
-			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
-				log.Printf("Failed to disconnect from %s: %v", networkName, err)
-			}
-
-			// Remove the network
-			if err := docker.RemoveNetwork(networkName); err != nil {
-				log.Printf("Failed to remove network %s: %v", networkName, err)
-			}
-
-			// Remove config for this network
-			if err := caddyMgr.RemoveConfig(networkName); err != nil {
-				log.Printf("Failed to remove config for %s: %v", networkName, err)
-			}
-
-			// Update status
-			statusMgr.Update(caddyMgr.ListConfigs())
+		if hasOtherContainers {
+			break
 		}
 	}
+
+	if !hasOtherContainers {
+		log.Printf("Network %s has no service containers after %s removal, cleaning up", expectedNetwork, containerName)
+
+		// Disconnect Caddy from network
+		if err := docker.DisconnectFromNetwork(expectedNetwork, cfg.CaddyContainer); err != nil {
+			log.Printf("Failed to disconnect from %s: %v", expectedNetwork, err)
+		}
+
+		// Remove the network
+		if err := docker.RemoveNetwork(expectedNetwork); err != nil {
+			log.Printf("Failed to remove network %s: %v", expectedNetwork, err)
+		}
+
+		// Remove config for this network
+		if err := caddyMgr.RemoveConfig(expectedNetwork); err != nil {
+			log.Printf("Failed to remove config for %s: %v", expectedNetwork, err)
+		}
+
+		// Update status
+		statusMgr.Update(caddyMgr.ListConfigs())
+	}
+}
+
+// extractProjectName extracts the Docker Compose project name from a container name
+// Container names are typically: {project}-{service}-{instance} or {project}_{service}_{instance}
+func extractProjectName(containerName string) string {
+	// Try hyphen separator first (newer Docker Compose)
+	if idx := strings.LastIndex(containerName, "-"); idx > 0 {
+		// Find second-to-last hyphen for project name
+		prefix := containerName[:idx]
+		if idx2 := strings.LastIndex(prefix, "-"); idx2 > 0 {
+			return prefix[:idx2]
+		}
+	}
+
+	// Try underscore separator (older Docker Compose)
+	if idx := strings.LastIndex(containerName, "_"); idx > 0 {
+		prefix := containerName[:idx]
+		if idx2 := strings.LastIndex(prefix, "_"); idx2 > 0 {
+			return prefix[:idx2]
+		}
+	}
+
+	return ""
 }
 
 func handleContainerStart(ctx context.Context, event events.Message, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
