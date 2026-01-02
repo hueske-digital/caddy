@@ -164,6 +164,11 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 		compression bool
 		header      bool
 		auth        bool
+		seo         bool
+		wwwRedirect bool
+		performance bool
+		security    bool
+		wordpress   bool
 	}{
 		{
 			name: "all defaults",
@@ -177,6 +182,11 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			compression: true,
 			header:      true,
 			auth:        false,
+			seo:         false,
+			wwwRedirect: false,
+			performance: true,
+			security:    true,
+			wordpress:   false,
 		},
 		{
 			name: "logging enabled",
@@ -191,6 +201,11 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			compression: true,
 			header:      true,
 			auth:        false,
+			seo:         false,
+			wwwRedirect: false,
+			performance: true,
+			security:    true,
+			wordpress:   false,
 		},
 		{
 			name: "auth enabled",
@@ -205,6 +220,68 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			compression: true,
 			header:      true,
 			auth:        true,
+			seo:         false,
+			wwwRedirect: false,
+			performance: true,
+			security:    true,
+			wordpress:   false,
+		},
+		{
+			name: "seo enabled",
+			env: map[string]string{
+				"CADDY_DOMAIN": "test.example.com",
+				"CADDY_TYPE":   "external",
+				"CADDY_PORT":   "80",
+				"CADDY_SEO":    "true",
+			},
+			logging:     false,
+			tls:         true,
+			compression: true,
+			header:      true,
+			auth:        false,
+			seo:         true,
+			wwwRedirect: false,
+			performance: true,
+			security:    true,
+			wordpress:   false,
+		},
+		{
+			name: "www redirect enabled",
+			env: map[string]string{
+				"CADDY_DOMAIN":       "test.example.com",
+				"CADDY_TYPE":         "external",
+				"CADDY_PORT":         "80",
+				"CADDY_WWW_REDIRECT": "true",
+			},
+			logging:     false,
+			tls:         true,
+			compression: true,
+			header:      true,
+			auth:        false,
+			seo:         false,
+			wwwRedirect: true,
+			performance: true,
+			security:    true,
+			wordpress:   false,
+		},
+		{
+			name: "wordpress enabled",
+			env: map[string]string{
+				"CADDY_DOMAIN":    "test.example.com",
+				"CADDY_TYPE":      "external",
+				"CADDY_PORT":      "80",
+				"CADDY_WORDPRESS": "true",
+			},
+			logging:     false,
+			tls:         true,
+			compression: true,
+			header:      true,
+			auth:        false,
+			seo:         false,
+			wwwRedirect: false,
+			performance: true,
+			security:    true,
+			wordpress:   true,
 		},
 		{
 			name: "all disabled",
@@ -215,12 +292,19 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_TLS":         "false",
 				"CADDY_COMPRESSION": "false",
 				"CADDY_HEADER":      "false",
+				"CADDY_PERFORMANCE": "false",
+				"CADDY_SECURITY":    "false",
 			},
 			logging:     false,
 			tls:         false,
 			compression: false,
 			header:      false,
 			auth:        false,
+			seo:         false,
+			wwwRedirect: false,
+			performance: false,
+			security:    false,
+			wordpress:   false,
 		},
 	}
 
@@ -244,6 +328,21 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			}
 			if cfg.Auth != tt.auth {
 				t.Errorf("auth: expected %v, got %v", tt.auth, cfg.Auth)
+			}
+			if cfg.SEO != tt.seo {
+				t.Errorf("seo: expected %v, got %v", tt.seo, cfg.SEO)
+			}
+			if cfg.WWWRedirect != tt.wwwRedirect {
+				t.Errorf("wwwRedirect: expected %v, got %v", tt.wwwRedirect, cfg.WWWRedirect)
+			}
+			if cfg.Performance != tt.performance {
+				t.Errorf("performance: expected %v, got %v", tt.performance, cfg.Performance)
+			}
+			if cfg.Security != tt.security {
+				t.Errorf("security: expected %v, got %v", tt.security, cfg.Security)
+			}
+			if cfg.WordPress != tt.wordpress {
+				t.Errorf("wordpress: expected %v, got %v", tt.wordpress, cfg.WordPress)
 			}
 		})
 	}
@@ -289,5 +388,59 @@ func TestParseCaddyEnv_ContainerNamePrefix(t *testing.T) {
 	// Should strip the leading slash
 	if cfg.Upstream != "my-container:80" {
 		t.Errorf("expected upstream my-container:80, got %s", cfg.Upstream)
+	}
+}
+
+func TestParseCaddyEnv_AuthPaths(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN":     "test.example.com",
+		"CADDY_TYPE":       "external",
+		"CADDY_PORT":       "80",
+		"CADDY_AUTH":       "true",
+		"CADDY_AUTH_PATHS": "/admin/*, /dashboard/*, /api/private/*",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Auth {
+		t.Error("expected Auth to be true")
+	}
+	if len(cfg.AuthPaths) != 3 {
+		t.Errorf("expected 3 auth paths, got %d", len(cfg.AuthPaths))
+	}
+	expected := []string{"/admin/*", "/dashboard/*", "/api/private/*"}
+	for i, e := range expected {
+		if i >= len(cfg.AuthPaths) {
+			t.Errorf("missing auth path %s", e)
+			continue
+		}
+		if cfg.AuthPaths[i] != e {
+			t.Errorf("expected auth path %s at index %d, got %s", e, i, cfg.AuthPaths[i])
+		}
+	}
+}
+
+func TestParseCaddyEnv_AuthPathsEmpty(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN": "test.example.com",
+		"CADDY_TYPE":   "external",
+		"CADDY_PORT":   "80",
+		"CADDY_AUTH":   "true",
+		// No CADDY_AUTH_PATHS = protect entire site
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Auth {
+		t.Error("expected Auth to be true")
+	}
+	if len(cfg.AuthPaths) != 0 {
+		t.Errorf("expected no auth paths, got %d", len(cfg.AuthPaths))
 	}
 }

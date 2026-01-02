@@ -126,6 +126,25 @@ wait_for() {
     return 0
 }
 
+# Wait for config file and return path
+wait_for_config() {
+    local dir="$1"
+    local pattern="$2"
+    local timeout="${3:-10}"
+    local elapsed=0
+
+    while [ $elapsed -lt $timeout ]; do
+        local file=$(ls "$dir/"$pattern 2>/dev/null | head -1)
+        if [ -n "$file" ] && [ -f "$file" ]; then
+            echo "$file"
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    return 1
+}
+
 # ============================================================================
 # TEST CASES
 # ============================================================================
@@ -156,17 +175,10 @@ EOF
 
     # Wait for config to appear in caddy's hosts directory
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    if wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10; then
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
+    if [ -n "$CONFIG_FILE" ]; then
         log_pass "Config file created"
-    else
-        log_fail "Config file not created within timeout"
-        docker compose -p "$COMPOSE_PROJECT" logs
-        return 1
-    fi
 
-    # Check config content
-    CONFIG_FILE="$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
-    if [ -f "$CONFIG_FILE" ]; then
         if grep -q "test-start.example.com" "$CONFIG_FILE"; then
             log_pass "Config contains correct domain"
         else
@@ -175,7 +187,8 @@ EOF
             cat "$CONFIG_FILE"
         fi
     else
-        log_fail "Config file disappeared before content check"
+        log_fail "Config file not created within timeout"
+        docker compose -p "$COMPOSE_PROJECT" logs
     fi
 
     docker compose -p "$COMPOSE_PROJECT" down
@@ -204,14 +217,14 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
     # Stop (not down) the service
     docker compose -p "$COMPOSE_PROJECT" stop
     sleep 2
 
     # Config should still exist
-    if [ -f "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf" ]; then
+    if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
         log_pass "Config file preserved after stop"
     else
         log_fail "Config file was removed after stop"
@@ -242,14 +255,14 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
     # Down the service
     docker compose -p "$COMPOSE_PROJECT" down
     sleep 2
 
     # Config should be removed
-    if [ ! -f "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf" ]; then
+    if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
         log_pass "Config file removed after down"
     else
         log_fail "Config file was NOT removed after down"
@@ -285,8 +298,9 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/external" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    if wait_for "[ -f '$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf' ]" 10; then
+    if [ -n "$CONFIG_FILE" ]; then
         log_pass "External config created in correct directory"
     else
         log_fail "External config not created"
@@ -317,11 +331,12 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/cloudflare" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    if wait_for "[ -f '$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf' ]" 10; then
+    if [ -n "$CONFIG_FILE" ]; then
         log_pass "Cloudflare config created in correct directory"
 
-        if grep -q "import cloudflare" "$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf"; then
+        if grep -q "import cloudflare" "$CONFIG_FILE"; then
             log_pass "Config contains import cloudflare"
         else
             log_fail "Config missing import cloudflare"
@@ -356,13 +371,13 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    if grep -q "import logging" "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"; then
+    if [ -n "$CONFIG_FILE" ] && grep -q "import logging" "$CONFIG_FILE"; then
         log_pass "Config contains import logging"
     else
         log_fail "Config missing import logging"
-        cat "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
+        [ -n "$CONFIG_FILE" ] && cat "$CONFIG_FILE"
     fi
 
     docker compose -p "$COMPOSE_PROJECT" down
@@ -393,9 +408,7 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
-
-    CONFIG_FILE="$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
     if ! grep -q "import tls" "$CONFIG_FILE"; then
         log_pass "Config does NOT contain import tls (disabled)"
@@ -440,15 +453,13 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    CONFIG_FILE="$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
-
-    if grep -q "a.example.com" "$CONFIG_FILE" && grep -q "b.example.com" "$CONFIG_FILE"; then
+    if [ -n "$CONFIG_FILE" ] && grep -q "a.example.com" "$CONFIG_FILE" && grep -q "b.example.com" "$CONFIG_FILE"; then
         log_pass "Config contains both domains"
     else
         log_fail "Config missing domains"
-        cat "$CONFIG_FILE"
+        [ -n "$CONFIG_FILE" ] && cat "$CONFIG_FILE"
     fi
 
     docker compose -p "$COMPOSE_PROJECT" down
@@ -483,9 +494,7 @@ EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
     HOSTS_DIR="$PROJECT_DIR/hosts"
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
-
-    CONFIG_FILE="$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
     OWNER=$(stat -c '%u:%g' "$CONFIG_FILE" 2>/dev/null)
 
     if [ "$OWNER" = "1000:1000" ]; then
@@ -521,13 +530,13 @@ networks:
 EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
-    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    if grep -q "import auth" "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"; then
+    if [ -n "$CONFIG_FILE" ] && grep -q "import auth" "$CONFIG_FILE"; then
         log_pass "Internal type: import auth present"
     else
         log_fail "Internal type: import auth missing"
-        cat "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
+        [ -n "$CONFIG_FILE" ] && cat "$CONFIG_FILE"
     fi
 
     docker compose -p "$COMPOSE_PROJECT" down
@@ -551,13 +560,13 @@ networks:
 EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
-    wait_for "[ -f '$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/external" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    if grep -q "import auth" "$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf"; then
+    if [ -n "$CONFIG_FILE" ] && grep -q "import auth" "$CONFIG_FILE"; then
         log_pass "External type: import auth present"
     else
         log_fail "External type: import auth missing"
-        cat "$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf"
+        [ -n "$CONFIG_FILE" ] && cat "$CONFIG_FILE"
     fi
 
     docker compose -p "$COMPOSE_PROJECT" down
@@ -581,13 +590,13 @@ networks:
 EOF
 
     docker compose -p "$COMPOSE_PROJECT" up -d
-    wait_for "[ -f '$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/cloudflare" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
 
-    if grep -q "import auth" "$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf"; then
+    if [ -n "$CONFIG_FILE" ] && grep -q "import auth" "$CONFIG_FILE"; then
         log_pass "Cloudflare type: import auth present"
     else
         log_fail "Cloudflare type: import auth missing"
-        cat "$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf"
+        [ -n "$CONFIG_FILE" ] && cat "$CONFIG_FILE"
     fi
 
     docker compose -p "$COMPOSE_PROJECT" down

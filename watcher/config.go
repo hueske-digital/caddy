@@ -7,6 +7,31 @@ import (
 	"strings"
 )
 
+// Type constants for CADDY_TYPE
+const (
+	TypeInternal   = "internal"
+	TypeExternal   = "external"
+	TypeCloudflare = "cloudflare"
+)
+
+// ValidTypes contains all valid CADDY_TYPE values
+var ValidTypes = []string{TypeInternal, TypeExternal, TypeCloudflare}
+
+// splitCommaSeparated splits a comma-separated string and trims whitespace
+func splitCommaSeparated(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var result []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
+}
+
 // Config holds the application configuration from environment variables
 type Config struct {
 	CaddyContainer     string
@@ -29,7 +54,12 @@ type CaddyConfig struct {
 	Compression bool     // From CADDY_COMPRESSION (optional, default true)
 	Header      bool     // From CADDY_HEADER (optional, default true)
 	Auth        bool     // From CADDY_AUTH (optional, default false)
+	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
 	SEO         bool     // From CADDY_SEO (optional, default false)
+	WWWRedirect bool     // From CADDY_WWW_REDIRECT (optional, default false)
+	Performance bool     // From CADDY_PERFORMANCE (optional, default true)
+	Security    bool     // From CADDY_SECURITY (optional, default true)
+	WordPress   bool     // From CADDY_WORDPRESS (optional, default false)
 }
 
 // ConfigKey returns the unique key for this config (container_network)
@@ -101,8 +131,15 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	}
 
 	// Validate type
-	if typ != "internal" && typ != "external" && typ != "cloudflare" {
-		return nil, fmt.Errorf("invalid CADDY_TYPE: %s (must be internal|external|cloudflare)", typ)
+	validType := false
+	for _, t := range ValidTypes {
+		if typ == t {
+			validType = true
+			break
+		}
+	}
+	if !validType {
+		return nil, fmt.Errorf("invalid CADDY_TYPE: %s (must be %s)", typ, strings.Join(ValidTypes, "|"))
 	}
 
 	// Validate port
@@ -111,16 +148,11 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	}
 
 	// Parse and validate domains
-	var domains []string
-	for _, d := range strings.Split(domain, ",") {
-		d = strings.TrimSpace(d)
-		if d == "" {
-			continue
-		}
+	domains := splitCommaSeparated(domain)
+	for _, d := range domains {
 		if !isValidDomain(d) {
 			return nil, fmt.Errorf("invalid domain: %s", d)
 		}
-		domains = append(domains, d)
 	}
 	if len(domains) == 0 {
 		return nil, fmt.Errorf("no valid domains in CADDY_DOMAIN")
@@ -132,15 +164,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	upstream := fmt.Sprintf("%s:%s", name, port)
 
 	// Parse allowlist (optional)
-	var allowlist []string
-	if allowlistStr := env["CADDY_ALLOWLIST"]; allowlistStr != "" {
-		for _, entry := range strings.Split(allowlistStr, ",") {
-			entry = strings.TrimSpace(entry)
-			if entry != "" {
-				allowlist = append(allowlist, entry)
-			}
-		}
-	}
+	allowlist := splitCommaSeparated(env["CADDY_ALLOWLIST"])
 
 	// Parse optional flags
 	logging := env["CADDY_LOGGING"] == "true"           // default: off
@@ -149,6 +173,13 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	header := env["CADDY_HEADER"] != "false"           // default: on
 	auth := env["CADDY_AUTH"] == "true"                 // default: off
 	seo := env["CADDY_SEO"] == "true"                   // default: off
+	wwwRedirect := env["CADDY_WWW_REDIRECT"] == "true" // default: off
+	performance := env["CADDY_PERFORMANCE"] != "false" // default: on
+	security := env["CADDY_SECURITY"] != "false"       // default: on
+	wordpress := env["CADDY_WORDPRESS"] == "true"       // default: off
+
+	// Parse auth paths (optional)
+	authPaths := splitCommaSeparated(env["CADDY_AUTH_PATHS"])
 
 	return &CaddyConfig{
 		Network:     network,
@@ -162,7 +193,12 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		Compression: compression,
 		Header:      header,
 		Auth:        auth,
+		AuthPaths:   authPaths,
 		SEO:         seo,
+		WWWRedirect: wwwRedirect,
+		Performance: performance,
+		Security:    security,
+		WordPress:   wordpress,
 	}, nil
 }
 

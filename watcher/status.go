@@ -96,11 +96,11 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			summary.Manual++
 		}
 		switch svc.Type {
-		case "external":
+		case TypeExternal:
 			summary.External++
-		case "internal":
+		case TypeInternal:
 			summary.Internal++
-		case "cloudflare":
+		case TypeCloudflare:
 			summary.Cloudflare++
 		}
 	}

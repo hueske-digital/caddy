@@ -43,22 +43,32 @@ services:
   myapp:
     image: myapp:latest
     environment:
-      - CADDY_DOMAIN=app.example.com        # Required: domain(s), comma-separated
-      - CADDY_TYPE=external                  # Required: external|internal|cloudflare
-      - CADDY_PORT=8080                      # Required: container port
-      - CADDY_ALLOWLIST=home.dyndns.org     # Optional: IP allowlist (external only)
-      - CADDY_AUTH=true                      # Optional: enable forward auth (default: off)
-      - CADDY_SEO=true                       # Optional: allow search engine indexing (default: off)
-      - CADDY_LOGGING=true                   # Optional: enable request logging (default: off)
-      - CADDY_TLS=false                      # Optional: disable TLS (default: on)
-      - CADDY_COMPRESSION=false              # Optional: disable compression (default: on)
-      - CADDY_HEADER=false                   # Optional: disable security headers (default: on)
+      # Required
+      - CADDY_DOMAIN=app.example.com         # Domain(s), comma-separated
+      - CADDY_TYPE=external                  # external|internal|cloudflare
+      - CADDY_PORT=8080                      # Container port
+      # Optional - enabled by default
+      - CADDY_TLS=false                      # Use HTTP challenge instead of Cloudflare DNS
+      - CADDY_COMPRESSION=false              # Disable zstd/gzip compression
+      - CADDY_HEADER=false                   # Disable security headers
+      - CADDY_PERFORMANCE=false              # Disable static asset caching
+      - CADDY_SECURITY=false                 # Disable sensitive file blocking
+      # Optional - disabled by default
+      - CADDY_ALLOWLIST=home.dyndns.org      # IP allowlist (external only)
+      - CADDY_AUTH=true                      # Enable forward auth (requires tinyauth)
+      - CADDY_AUTH_PATHS=/admin/*,/api/*     # Protect only these paths (default: entire site)
+      - CADDY_SEO=true                       # Allow search engine indexing
+      - CADDY_WWW_REDIRECT=true              # Redirect www to non-www
+      - CADDY_WORDPRESS=true                 # Enable WordPress security rules
+      - CADDY_LOGGING=true                   # Enable request logging
     networks:
       - caddy
 
 networks:
   caddy:
 ```
+
+> **Note:** `CADDY_TLS=false` disables the Cloudflare DNS challenge, not TLS itself. Caddy will use HTTP challenge instead. Use this for publicly accessible domains that don't require wildcards.
 
 ### Types
 
@@ -88,14 +98,23 @@ Place custom `.conf` files in:
 - `hosts/cloudflare/` - Cloudflare-proxied services
 
 Available snippets (defined in `hosts/base.conf`):
-- `(tls)` - Cloudflare DNS challenge
-- `(internal)` - private IP matcher
-- `(cloudflare)` - Cloudflare IP matcher
-- `(compression)` - zstd/gzip
-- `(header)` - security headers (blocks indexing by default)
+
+**IP Matchers:**
+- `(internal)` - private IP ranges (10.x, 172.16-31.x, 192.168.x)
+- `(cloudflare)` - Cloudflare proxy IPs
+
+**Auto-enabled** (disable with `CADDY_*=false`):
+- `(tls)` - Cloudflare DNS challenge for wildcard/internal domains
+- `(compression)` - zstd/gzip compression
+- `(header)` - security headers (HSTS, no indexing, hide server info)
+- `(performance)` - static asset caching (1 year), skip logs for favicon/robots
+- `(security)` - block .env, .git, .bak, .sql, and other sensitive files
+
+**Opt-in** (enable with `CADDY_*=true`):
+- `(logging)` - request logging to stdout
 - `(seo)` - allow search engine indexing (removes X-Robots-Tag)
-- `(logging)` - stdout logging
-- `(auth)` - forward auth (requires tinyauth)
+- `(auth)` - forward auth via tinyauth (requires docker-compose.auth.yml)
+- `(wordpress)` - block PHP execution in wp-content/uploads, plugins, themes
 
 ## Authentication
 
@@ -202,6 +221,10 @@ Full end-to-end tests with Docker containers:
 | Cloudflare type | Config includes `import cloudflare` directive |
 | Logging option | `CADDY_LOGGING=true` adds `import logging` |
 | Auth option | `CADDY_AUTH=true` adds `import auth` (all types) |
+| SEO option | `CADDY_SEO=true` adds `import seo` for indexing |
+| WWW redirect | `CADDY_WWW_REDIRECT=true` adds www to non-www redirect |
+| WordPress option | `CADDY_WORDPRESS=true` adds `import wordpress` |
+| Performance/Security | Enabled by default, disable with `=false` |
 | Disabled options | `CADDY_TLS/COMPRESSION/HEADER=false` removes imports |
 | Multiple domains | Comma-separated domains all included in config |
 | File ownership | Files created with UID/GID 1000:1000 (Linux only) |

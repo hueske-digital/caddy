@@ -570,3 +570,408 @@ func TestWriteConfig_Allowlist(t *testing.T) {
 		t.Error("expected second IP in allowlist")
 	}
 }
+
+func TestWriteConfig_WithSEO(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		SEO:         true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !strings.Contains(string(content), "import seo") {
+		t.Error("expected import seo when SEO is true")
+	}
+}
+
+func TestWriteConfig_WithWWWRedirect(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		WWWRedirect: true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	// Check for www redirect block
+	if !strings.Contains(contentStr, "https://www.example.com") {
+		t.Error("expected www redirect domain")
+	}
+	if !strings.Contains(contentStr, "redir https://example.com{uri} permanent") {
+		t.Error("expected redirect directive")
+	}
+	if !strings.Contains(contentStr, "# www redirect") {
+		t.Error("expected www redirect comment")
+	}
+}
+
+func TestWriteConfig_WWWRedirect_MultipleDomains(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"example.com", "other.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		WWWRedirect: true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	// Check for both www redirect blocks
+	if !strings.Contains(contentStr, "https://www.example.com") {
+		t.Error("expected www.example.com redirect")
+	}
+	if !strings.Contains(contentStr, "https://www.other.com") {
+		t.Error("expected www.other.com redirect")
+	}
+	if !strings.Contains(contentStr, "redir https://example.com{uri} permanent") {
+		t.Error("expected redirect to example.com")
+	}
+	if !strings.Contains(contentStr, "redir https://other.com{uri} permanent") {
+		t.Error("expected redirect to other.com")
+	}
+}
+
+func TestWriteConfig_NoWWWRedirect(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		WWWRedirect: false,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	if strings.Contains(contentStr, "www.example.com") {
+		t.Error("unexpected www redirect when WWWRedirect is false")
+	}
+}
+
+func TestGenerateWWWRedirectBlocks(t *testing.T) {
+	domains := []string{"example.com", "test.org"}
+	result := generateWWWRedirectBlocks(domains)
+
+	if !strings.Contains(result, "https://www.example.com") {
+		t.Error("expected www.example.com in result")
+	}
+	if !strings.Contains(result, "https://www.test.org") {
+		t.Error("expected www.test.org in result")
+	}
+	if !strings.Contains(result, "import tls") {
+		t.Error("expected import tls in redirect blocks")
+	}
+	if !strings.Contains(result, "redir https://example.com{uri} permanent") {
+		t.Error("expected redirect to example.com")
+	}
+	if !strings.Contains(result, "redir https://test.org{uri} permanent") {
+		t.Error("expected redirect to test.org")
+	}
+}
+
+func TestWriteConfig_WithPerformance(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		Performance: true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !strings.Contains(string(content), "import performance") {
+		t.Error("expected import performance")
+	}
+}
+
+func TestWriteConfig_WithSecurity(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		Security:    true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !strings.Contains(string(content), "import security") {
+		t.Error("expected import security")
+	}
+}
+
+func TestWriteConfig_WithWordPress(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		WordPress:   true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !strings.Contains(string(content), "import wordpress") {
+		t.Error("expected import wordpress")
+	}
+}
+
+func TestWriteConfig_DefaultsIncludePerformanceAndSecurity(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	// Using defaults: performance and security should be true
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		Performance: true, // default on
+		Security:    true, // default on
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "import performance") {
+		t.Error("expected import performance by default")
+	}
+	if !strings.Contains(contentStr, "import security") {
+		t.Error("expected import security by default")
+	}
+	if strings.Contains(contentStr, "import wordpress") {
+		t.Error("unexpected import wordpress (should be off by default)")
+	}
+}
+
+func TestWriteConfig_AuthWithPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthPaths:   []string{"/admin/*", "/dashboard/*"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	// Should NOT have import auth (that's for full site)
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("unexpected import auth when AuthPaths is set")
+	}
+	// Should have path-based auth
+	if !strings.Contains(contentStr, "@auth-paths path /admin/* /dashboard/*") {
+		t.Error("expected @auth-paths matcher")
+	}
+	if !strings.Contains(contentStr, "forward_auth @auth-paths") {
+		t.Error("expected forward_auth with @auth-paths matcher")
+	}
+}
+
+func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthPaths:   nil, // No paths = full site auth
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	// Should have import auth for full site
+	if !strings.Contains(contentStr, "import auth") {
+		t.Error("expected import auth when AuthPaths is empty")
+	}
+	// Should NOT have path-based auth
+	if strings.Contains(contentStr, "@auth-paths") {
+		t.Error("unexpected @auth-paths when AuthPaths is empty")
+	}
+}
+
+func TestGeneratePathBasedAuth(t *testing.T) {
+	paths := []string{"/admin/*", "/api/private/*"}
+	result := generatePathBasedAuth(paths)
+
+	if !strings.Contains(result, "@auth-paths path /admin/* /api/private/*") {
+		t.Error("expected path matcher with all paths")
+	}
+	if !strings.Contains(result, "forward_auth @auth-paths") {
+		t.Error("expected forward_auth with matcher")
+	}
+	if !strings.Contains(result, "uri /api/auth/caddy") {
+		t.Error("expected tinyauth uri")
+	}
+	if !strings.Contains(result, "copy_headers Remote-User Remote-Email Remote-Groups") {
+		t.Error("expected copy_headers directive")
+	}
+}

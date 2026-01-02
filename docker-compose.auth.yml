@@ -16,11 +16,11 @@ services:
       - PROVIDERS_POCKETID_SCOPES=openid email profile groups
       - PROVIDERS_POCKETID_NAME=Pocket ID
       - OAUTH_AUTO_REDIRECT=pocketid
+      - DISABLE_ANALYTICS=true
       # Caddy auto-discovery
       - CADDY_DOMAIN=${TINYAUTH_DOMAIN}
       - CADDY_TYPE=${TINYAUTH_TYPE:-external}
       - CADDY_PORT=3000
-      - DISABLE_ANALYTICS=true
     networks:
       - caddy
 
