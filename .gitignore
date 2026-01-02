@@ -22,3 +22,4 @@ hosts/status.json
 # Go
 watcher/watcher
 watcher/network-watcher
+.DS_Store

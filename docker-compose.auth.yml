@@ -1,0 +1,18 @@
+services:
+  tinyauth:
+    image: ghcr.io/steveiliop56/tinyauth
+    restart: unless-stopped
+    environment:
+      # TinyAuth config
+      - SECRET=${TINYAUTH_SECRET}
+      - APP_URL=${TINYAUTH_APP_URL}
+      - OIDC_ENABLED=${OIDC_ENABLED:-true}
+      - OIDC_PROVIDER_URL=${OIDC_PROVIDER_URL}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      # Caddy auto-discovery
+      - CADDY_DOMAIN=${TINYAUTH_DOMAIN}
+      - CADDY_TYPE=${TINYAUTH_TYPE:-internal}
+      - CADDY_PORT=3000
+    networks:
+      - caddy

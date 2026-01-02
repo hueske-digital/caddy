@@ -18,6 +18,7 @@ type ServiceStatus struct {
 	TLS         bool     `json:"tls"`
 	Compression bool     `json:"compression"`
 	Header      bool     `json:"header"`
+	Auth        bool     `json:"auth"`
 	Managed     bool     `json:"managed"`
 	ConfigPath  string   `json:"configPath,omitempty"`
 }
@@ -78,6 +79,7 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			TLS:         cfg.TLS,
 			Compression: cfg.Compression,
 			Header:      cfg.Header,
+			Auth:        cfg.Auth,
 			Managed:     cfg.Managed,
 			ConfigPath:  cfg.Path,
 		})

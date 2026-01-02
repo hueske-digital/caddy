@@ -63,6 +63,7 @@ type ConfigInfo struct {
 	TLS         bool
 	Compression bool
 	Header      bool
+	Auth        bool
 	Path        string
 	Managed     bool
 }
@@ -112,6 +113,9 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	}
 	if cfg.Header {
 		imports = append(imports, "    import header")
+	}
+	if cfg.Auth {
+		imports = append(imports, "    import auth")
 	}
 	content = strings.ReplaceAll(content, "{{IMPORTS}}", strings.Join(imports, "\n"))
 
@@ -310,6 +314,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.TLS = cfg.TLS
 				info.Compression = cfg.Compression
 				info.Header = cfg.Header
+				info.Auth = cfg.Auth
 			}
 
 			result = append(result, info)

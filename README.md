@@ -37,6 +37,7 @@ services:
       - CADDY_TYPE=external                  # Required: external|internal|cloudflare
       - CADDY_PORT=8080                      # Required: container port
       - CADDY_ALLOWLIST=home.dyndns.org     # Optional: IP allowlist (external only)
+      - CADDY_AUTH=true                      # Optional: enable forward auth (default: off)
       - CADDY_LOGGING=true                   # Optional: enable request logging (default: off)
       - CADDY_TLS=false                      # Optional: disable TLS (default: on)
       - CADDY_COMPRESSION=false              # Optional: disable compression (default: on)
@@ -82,6 +83,30 @@ Available snippets (defined in `hosts/base.conf`):
 - `(compression)` - zstd/gzip
 - `(header)` - security headers
 - `(logging)` - stdout logging
+- `(auth)` - forward auth (requires tinyauth)
+
+## Authentication
+
+Optional forward auth via tinyauth + OIDC provider (e.g., PocketID, Authelia):
+
+```bash
+# Configure in .env
+TINYAUTH_SECRET=random-secret
+TINYAUTH_APP_URL=https://auth.example.com
+TINYAUTH_DOMAIN=auth.example.com
+OIDC_PROVIDER_URL=https://pocketid.example.com
+OIDC_CLIENT_ID=tinyauth
+OIDC_CLIENT_SECRET=your-secret
+
+# Start with auth
+make up-auth
+```
+
+Then enable per service:
+```yaml
+environment:
+  - CADDY_AUTH=true
+```
 
 ## Status Dashboard
 

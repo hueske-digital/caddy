@@ -28,6 +28,7 @@ type CaddyConfig struct {
 	TLS         bool     // From CADDY_TLS (optional, default true)
 	Compression bool     // From CADDY_COMPRESSION (optional, default true)
 	Header      bool     // From CADDY_HEADER (optional, default true)
+	Auth        bool     // From CADDY_AUTH (optional, default false)
 }
 
 // ConfigKey returns the unique key for this config (container_network)
@@ -145,6 +146,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	tls := env["CADDY_TLS"] != "false"                  // default: on
 	compression := env["CADDY_COMPRESSION"] != "false" // default: on
 	header := env["CADDY_HEADER"] != "false"           // default: on
+	auth := env["CADDY_AUTH"] == "true"                 // default: off
 
 	return &CaddyConfig{
 		Network:     network,
@@ -157,6 +159,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		TLS:         tls,
 		Compression: compression,
 		Header:      header,
+		Auth:        auth,
 	}, nil
 }
 

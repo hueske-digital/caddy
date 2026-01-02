@@ -163,6 +163,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 		tls         bool
 		compression bool
 		header      bool
+		auth        bool
 	}{
 		{
 			name: "all defaults",
@@ -175,6 +176,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			tls:         true,
 			compression: true,
 			header:      true,
+			auth:        false,
 		},
 		{
 			name: "logging enabled",
@@ -188,6 +190,21 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			tls:         true,
 			compression: true,
 			header:      true,
+			auth:        false,
+		},
+		{
+			name: "auth enabled",
+			env: map[string]string{
+				"CADDY_DOMAIN": "test.example.com",
+				"CADDY_TYPE":   "external",
+				"CADDY_PORT":   "80",
+				"CADDY_AUTH":   "true",
+			},
+			logging:     false,
+			tls:         true,
+			compression: true,
+			header:      true,
+			auth:        true,
 		},
 		{
 			name: "all disabled",
@@ -203,6 +220,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			tls:         false,
 			compression: false,
 			header:      false,
+			auth:        false,
 		},
 	}
 
@@ -223,6 +241,9 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			}
 			if cfg.Header != tt.header {
 				t.Errorf("header: expected %v, got %v", tt.header, cfg.Header)
+			}
+			if cfg.Auth != tt.auth {
+				t.Errorf("auth: expected %v, got %v", tt.auth, cfg.Auth)
 			}
 		})
 	}

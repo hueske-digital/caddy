@@ -229,6 +229,38 @@ func TestWriteConfig_WithLogging(t *testing.T) {
 	}
 }
 
+func TestWriteConfig_WithAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !strings.Contains(string(content), "import auth") {
+		t.Error("expected import auth when auth is true")
+	}
+}
+
 func TestWriteConfig_DisabledOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
