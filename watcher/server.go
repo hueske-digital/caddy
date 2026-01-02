@@ -83,6 +83,10 @@ const statusHTML = `<!DOCTYPE html>
         <!-- Filters -->
         <div class="flex flex-wrap items-center gap-4 mb-6">
             <div class="flex items-center gap-2">
+                <span class="text-sm text-zinc-500">Search:</span>
+                <input type="text" id="search" placeholder="Filter..." class="px-3 py-1.5 text-sm border border-zinc-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent w-40">
+            </div>
+            <div class="flex items-center gap-2">
                 <span class="text-sm text-zinc-500">Source:</span>
                 <div class="inline-flex rounded-lg border border-zinc-200 bg-white p-1">
                     <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="all">All</button>
@@ -128,6 +132,7 @@ const statusHTML = `<!DOCTYPE html>
     <script>
         let currentFilter = 'all';
         let currentType = 'all';
+        let searchQuery = '';
         let allServices = [];
         let codeEditorUrl = '';
 
@@ -261,6 +266,17 @@ const statusHTML = `<!DOCTYPE html>
                 services = services.filter(s => s.type === currentType);
             }
 
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                services = services.filter(s =>
+                    (s.domains || []).some(d => d.toLowerCase().includes(q)) ||
+                    (s.container || '').toLowerCase().includes(q) ||
+                    (s.network || '').toLowerCase().includes(q) ||
+                    (s.type || '').toLowerCase().includes(q) ||
+                    (s.allowlist || []).some(a => a.toLowerCase().includes(q))
+                );
+            }
+
             services = services.slice().sort((a, b) => getFirstDomain(a).localeCompare(getFirstDomain(b)));
 
             const showConfig = !!codeEditorUrl;
@@ -336,6 +352,11 @@ const statusHTML = `<!DOCTYPE html>
                 updateTypeButtons();
                 renderServices();
             });
+        });
+
+        document.getElementById('search').addEventListener('input', (e) => {
+            searchQuery = e.target.value;
+            renderServices();
         });
 
         loadFilterFromHash();
