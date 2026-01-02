@@ -225,7 +225,7 @@ const statusHTML = `<!DOCTYPE html>
                     <tr class="hover:bg-zinc-50/50 transition-colors">
                         <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
                         <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
-                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).join(', ') || '<span class="text-zinc-300">—</span>'}</td>
+                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).map(a => '<span class="block leading-relaxed">' + a + '</span>').join('') || '<span class="text-zinc-300">—</span>'}</td>
                         <td class="px-4 py-3"><div class="flex items-center gap-2">${optionIcons(svc)}</div></td>
                         ${showConfig ? '<td class="config-cell px-4 py-3 text-center">' + configLink(svc) + '</td>' : ''}
                     </tr>
