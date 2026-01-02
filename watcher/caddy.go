@@ -234,11 +234,7 @@ func (m *CaddyManager) generateHandleContent(cfg *CaddyConfig) string {
 	// to ensure the group check happens AFTER forward_auth sets the header
 	if len(cfg.AuthGroups) > 0 {
 		groupPattern := strings.Join(cfg.AuthGroups, "|")
-		// Strip incoming Remote-* headers for security (prevent header injection)
 		return fmt.Sprintf(`        route {
-            request_header -Remote-User
-            request_header -Remote-Email
-            request_header -Remote-Groups
             forward_auth {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000 {
                 uri /api/auth/caddy
                 copy_headers Remote-User Remote-Email Remote-Groups
