@@ -436,8 +436,8 @@ func (m *CaddyManager) WriteWildcardConfigs(domains []string) error {
 		return nil
 	}
 
-	// Wildcards go into external directory (they need to be publicly accessible for ACME)
-	dir := filepath.Join(m.hostsDir, TypeExternal)
+	// Wildcards go into hosts root directory (global configs like base.conf)
+	dir := m.hostsDir
 
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -446,9 +446,7 @@ func (m *CaddyManager) WriteWildcardConfigs(domains []string) error {
 	os.Chown(dir, 1000, 1000)
 
 	for _, domain := range domains {
-		// Sanitize domain for filename (replace dots with underscores)
-		safeName := strings.ReplaceAll(domain, ".", "_")
-		filename := fmt.Sprintf("_wildcard_%s.conf", safeName)
+		filename := fmt.Sprintf("wildcard.%s.conf", domain)
 		path := filepath.Join(dir, filename)
 
 		// Generate content from template
@@ -479,9 +477,8 @@ func (m *CaddyManager) GetWildcardDomains() []string {
 	defer m.mu.RUnlock()
 
 	var domains []string
-	dir := filepath.Join(m.hostsDir, TypeExternal)
 
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(m.hostsDir)
 	if err != nil {
 		return domains
 	}
@@ -491,12 +488,11 @@ func (m *CaddyManager) GetWildcardDomains() []string {
 			continue
 		}
 		name := entry.Name()
-		// Match _wildcard_*.conf pattern
-		if strings.HasPrefix(name, "_wildcard_") && strings.HasSuffix(name, ".conf") {
-			// Extract domain: _wildcard_example_com.conf -> example.com
-			domain := strings.TrimPrefix(name, "_wildcard_")
+		// Match wildcard.*.conf pattern
+		if strings.HasPrefix(name, "wildcard.") && strings.HasSuffix(name, ".conf") {
+			// Extract domain: wildcard.example.com.conf -> example.com
+			domain := strings.TrimPrefix(name, "wildcard.")
 			domain = strings.TrimSuffix(domain, ".conf")
-			domain = strings.ReplaceAll(domain, "_", ".")
 			domains = append(domains, domain)
 		}
 	}

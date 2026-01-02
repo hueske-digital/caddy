@@ -255,7 +255,7 @@ const statusHTML = `<!DOCTYPE html>
                 const data = await res.json();
                 document.getElementById('updated').textContent = 'Updated ' + new Date(data.updated).toLocaleString();
                 // Filter out wildcard configs (they're shown separately)
-                allServices = (data.services || []).filter(s => !s.configPath || !s.configPath.includes('_wildcard_'));
+                allServices = (data.services || []).filter(s => !s.configPath || !s.configPath.includes('/wildcard.'));
                 codeEditorUrl = data.codeEditorUrl || '';
                 renderWildcards(data.wildcardDomains);
                 renderServices();
