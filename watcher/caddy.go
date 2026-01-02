@@ -465,7 +465,7 @@ func (m *CaddyManager) WriteWildcardConfigs(domains []string) error {
 		}
 		os.Chown(path, 1000, 1000)
 
-		log.Printf("Generated wildcard config: %s/*.%s", TypeExternal, domain)
+		log.Printf("Generated wildcard config: wildcard.%s.conf", domain)
 	}
 
 	return nil
