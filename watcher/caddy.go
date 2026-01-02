@@ -218,11 +218,11 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     reverse_proxy %s`, cfg.Upstream)
 	}
 
-	// Generate allowlist block
+	// Generate allowlist block (private_ranges always allowed for internal access)
 	ipList := FormatAllowlistMatcher(ips)
 	return fmt.Sprintf(`
     @allowed {
-        remote_ip %s
+        remote_ip private_ranges %s
     }
 
     handle @allowed {

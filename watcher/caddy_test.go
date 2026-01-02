@@ -569,6 +569,9 @@ func TestWriteConfig_Allowlist(t *testing.T) {
 	if !strings.Contains(contentStr, "5.6.7.8") {
 		t.Error("expected second IP in allowlist")
 	}
+	if !strings.Contains(contentStr, "private_ranges") {
+		t.Error("expected private_ranges for internal network access")
+	}
 }
 
 func TestWriteConfig_WithSEO(t *testing.T) {
