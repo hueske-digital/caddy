@@ -2,6 +2,8 @@ services:
   tinyauth:
     image: ghcr.io/steveiliop56/tinyauth
     restart: unless-stopped
+    profiles:
+      - auth
     environment:
       # TinyAuth config
       - SECRET=${TINYAUTH_SECRET}

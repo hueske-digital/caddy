@@ -22,8 +22,10 @@ make up
 | `make up` | Start Caddy only |
 | `make up-auth` | Start Caddy + TinyAuth |
 | `make up-all` | Start all services |
-| `make down` | Stop Caddy |
+| `make down` | Stop all services |
 | `make logs` | Follow logs |
+
+> **Note:** All commands use Docker Compose profiles. Running `make up` after `make up-auth` won't stop TinyAuth - it continues running. Use `make down` to stop everything.
 
 ## How It Works
 
