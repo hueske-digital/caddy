@@ -15,6 +15,7 @@ var templates = map[string]string{
 
 {{DOMAINS}} {
 {{IMPORTS}}
+{{AUTH_GROUPS_BLOCK}}
 {{ALLOWLIST_BLOCK}}
 }
 `,
@@ -23,7 +24,7 @@ var templates = map[string]string{
 {{DOMAINS}} {
 {{IMPORTS}}
     import internal
-
+{{AUTH_GROUPS_BLOCK}}
     handle @internal {
         reverse_proxy {{UPSTREAM}}
     }
@@ -35,7 +36,7 @@ var templates = map[string]string{
 {{DOMAINS}} {
 {{IMPORTS}}
     import cloudflare
-
+{{AUTH_GROUPS_BLOCK}}
     handle @cloudflare {
         reverse_proxy {{UPSTREAM}}
     }
@@ -119,6 +120,10 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	}
 	content = strings.ReplaceAll(content, "{{IMPORTS}}", strings.Join(imports, "\n"))
 
+	// Handle auth groups placeholder
+	authGroupsBlock := m.generateAuthGroupsBlock(cfg)
+	content = strings.ReplaceAll(content, "{{AUTH_GROUPS_BLOCK}}", authGroupsBlock)
+
 	// Handle allowlist placeholder
 	allowlistBlock := m.generateAllowlistBlock(cfg)
 	content = strings.ReplaceAll(content, "{{ALLOWLIST_BLOCK}}", allowlistBlock)
@@ -198,6 +203,23 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
         reverse_proxy %s
     }
     abort`, ipList, cfg.Upstream)
+}
+
+// generateAuthGroupsBlock generates the auth groups check block for a config
+func (m *CaddyManager) generateAuthGroupsBlock(cfg *CaddyConfig) string {
+	// If no auth groups, return empty
+	if len(cfg.AuthGroups) == 0 {
+		return ""
+	}
+
+	// Build regex pattern for groups: (^|,)(group1|group2)($|,)
+	// This matches groups in a comma-separated list
+	groupPattern := strings.Join(cfg.AuthGroups, "|")
+
+	// Simple approach: respond 403 if NOT in allowed groups
+	return fmt.Sprintf(`
+    @unauthorized_group not header_regexp Remote-Groups "(^|,)(%s)($|,)"
+    respond @unauthorized_group "Forbidden - group not allowed" 403`, groupPattern)
 }
 
 // RemoveConfig removes all Caddyfile configurations for a network

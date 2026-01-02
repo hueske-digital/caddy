@@ -29,6 +29,7 @@ type CaddyConfig struct {
 	Compression bool     // From CADDY_COMPRESSION (optional, default true)
 	Header      bool     // From CADDY_HEADER (optional, default true)
 	Auth        bool     // From CADDY_AUTH (optional, default false)
+	AuthGroups  []string // From CADDY_AUTH_GROUPS (optional, comma-separated)
 }
 
 // ConfigKey returns the unique key for this config (container_network)
@@ -148,6 +149,21 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	header := env["CADDY_HEADER"] != "false"           // default: on
 	auth := env["CADDY_AUTH"] == "true"                 // default: off
 
+	// Parse auth groups (optional)
+	var authGroups []string
+	if groupsStr := env["CADDY_AUTH_GROUPS"]; groupsStr != "" {
+		for _, g := range strings.Split(groupsStr, ",") {
+			g = strings.TrimSpace(g)
+			if g != "" {
+				authGroups = append(authGroups, g)
+			}
+		}
+		// If groups are specified, auth must be enabled
+		if len(authGroups) > 0 {
+			auth = true
+		}
+	}
+
 	return &CaddyConfig{
 		Network:     network,
 		Container:   name,
@@ -160,6 +176,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		Compression: compression,
 		Header:      header,
 		Auth:        auth,
+		AuthGroups:  authGroups,
 	}, nil
 }
 
