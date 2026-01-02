@@ -160,8 +160,8 @@ const statusHTML = `<!DOCTYPE html>
         function domainLinks(domains) {
             if (!domains || domains.length === 0) return '<span class="text-zinc-400">—</span>';
             return domains.map(d =>
-                '<a href="https://' + d + '" target="_blank" class="text-zinc-900 hover:text-blue-600 transition-colors">' + d + '</a>'
-            ).join('<span class="text-zinc-300 mx-1">,</span> ');
+                '<a href="https://' + d + '" target="_blank" class="text-zinc-900 hover:text-blue-600 transition-colors block leading-relaxed">' + d + '</a>'
+            ).join('');
         }
 
         function typeLabel(type, managed) {
