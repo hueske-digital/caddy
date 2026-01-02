@@ -25,7 +25,9 @@ var templates = map[string]string{
     import internal
 
     handle @internal {
-        reverse_proxy {{UPSTREAM}}
+        reverse_proxy {{UPSTREAM}} {
+            header_down -Via
+        }
     }
     abort
 }
@@ -37,7 +39,10 @@ var templates = map[string]string{
     import cloudflare
 
     handle @cloudflare {
-        reverse_proxy {{UPSTREAM}}
+        reverse_proxy {{UPSTREAM}} {
+            header_up X-Real-IP {header.CF-Connecting-IP}
+            header_down -Via
+        }
     }
     abort
 }
@@ -165,7 +170,10 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 
 	// No allowlist - simple reverse_proxy
 	if len(cfg.Allowlist) == 0 {
-		return fmt.Sprintf("\n    reverse_proxy %s", cfg.Upstream)
+		return fmt.Sprintf(`
+    reverse_proxy %s {
+        header_down -Via
+    }`, cfg.Upstream)
 	}
 
 	// Get resolved IPs from allowlist manager
@@ -185,7 +193,10 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	// If still no IPs, return simple reverse_proxy (fallback)
 	if len(ips) == 0 {
 		log.Printf("Warning: no resolved IPs for allowlist in %s, falling back to open access", cfg.Network)
-		return fmt.Sprintf("\n    reverse_proxy %s", cfg.Upstream)
+		return fmt.Sprintf(`
+    reverse_proxy %s {
+        header_down -Via
+    }`, cfg.Upstream)
 	}
 
 	// Generate allowlist block
@@ -196,7 +207,9 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     }
 
     handle @allowed {
-        reverse_proxy %s
+        reverse_proxy %s {
+            header_down -Via
+        }
     }
     abort`, ipList, cfg.Upstream)
 }
