@@ -602,6 +602,67 @@ EOF
     docker compose -p "$COMPOSE_PROJECT" down
 }
 
+test_force_recreate() {
+    run_test "Force recreate works without issues"
+
+    cd "$TEST_DIR"
+    HOSTS_DIR="$PROJECT_DIR/hosts"
+
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-recreate.example.com
+      - CADDY_TYPE=internal
+      - CADDY_PORT=80
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    # Start service
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    CONFIG_FILE=$(wait_for_config "$HOSTS_DIR/internal" "*_${COMPOSE_PROJECT}_caddy.conf" 10)
+
+    if [ -z "$CONFIG_FILE" ]; then
+        log_fail "Initial config not created"
+        docker compose -p "$COMPOSE_PROJECT" down
+        return 1
+    fi
+
+    # Force recreate - this is the tricky case
+    docker compose -p "$COMPOSE_PROJECT" up -d --force-recreate
+
+    # Wait a moment for events to process
+    sleep 2
+
+    # Config should still exist
+    if [ -f "$CONFIG_FILE" ]; then
+        log_pass "Config preserved after force-recreate"
+    else
+        log_fail "Config was removed after force-recreate"
+    fi
+
+    # Container should be running
+    if docker ps --format '{{.Names}}' | grep -q "${COMPOSE_PROJECT}-testapp-1"; then
+        log_pass "Container running after force-recreate"
+    else
+        log_fail "Container not running after force-recreate"
+    fi
+
+    # Network should exist
+    if docker network ls --format '{{.Name}}' | grep -q "${COMPOSE_PROJECT}_caddy"; then
+        log_pass "Network exists after force-recreate"
+    else
+        log_fail "Network missing after force-recreate"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+}
+
 test_status_api() {
     run_test "Status API returns JSON"
 
@@ -673,6 +734,7 @@ main() {
     test_service_start
     test_service_stop
     test_service_down
+    test_force_recreate
     test_external_type
     test_cloudflare_type
     test_logging_option
