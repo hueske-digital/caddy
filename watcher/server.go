@@ -81,12 +81,23 @@ const statusHTML = `<!DOCTYPE html>
         </div>
 
         <!-- Filters -->
-        <div class="flex items-center gap-2 mb-6">
-            <span class="text-sm text-zinc-500">Filter:</span>
-            <div class="inline-flex rounded-lg border border-zinc-200 bg-white p-1">
-                <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="all">All</button>
-                <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="managed">Managed</button>
-                <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="manual">Manual</button>
+        <div class="flex flex-wrap items-center gap-4 mb-6">
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-zinc-500">Source:</span>
+                <div class="inline-flex rounded-lg border border-zinc-200 bg-white p-1">
+                    <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="all">All</button>
+                    <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="managed">Managed</button>
+                    <button class="filter-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-filter="manual">Manual</button>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-zinc-500">Type:</span>
+                <div class="inline-flex rounded-lg border border-zinc-200 bg-white p-1">
+                    <button class="type-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-type="all">All</button>
+                    <button class="type-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-type="external">External</button>
+                    <button class="type-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-type="internal">Internal</button>
+                    <button class="type-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-type="cloudflare">Cloudflare</button>
+                </div>
             </div>
         </div>
 
@@ -116,6 +127,7 @@ const statusHTML = `<!DOCTYPE html>
 
     <script>
         let currentFilter = 'all';
+        let currentType = 'all';
         let allServices = [];
         let codeEditorUrl = '';
 
@@ -128,8 +140,22 @@ const statusHTML = `<!DOCTYPE html>
             auth: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>',
             external: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>',
             managed: '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
-            manual: '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>'
+            manual: '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
+            copy: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>',
+            check: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
         };
+
+        function copyToClipboard(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                const original = btn.innerHTML;
+                btn.innerHTML = icons.check;
+                btn.classList.add('text-emerald-500');
+                setTimeout(() => {
+                    btn.innerHTML = original;
+                    btn.classList.remove('text-emerald-500');
+                }, 1000);
+            });
+        }
 
         const optionInfo = {
             log: 'Request logging',
@@ -141,10 +167,15 @@ const statusHTML = `<!DOCTYPE html>
 
         function loadFilterFromHash() {
             const hash = window.location.hash.slice(1);
-            if (['all', 'managed', 'manual'].includes(hash)) {
-                currentFilter = hash;
+            const parts = hash.split(',');
+            if (parts[0] && ['all', 'managed', 'manual'].includes(parts[0])) {
+                currentFilter = parts[0];
+            }
+            if (parts[1] && ['all', 'external', 'internal', 'cloudflare'].includes(parts[1])) {
+                currentType = parts[1];
             }
             updateFilterButtons();
+            updateTypeButtons();
         }
 
         function updateFilterButtons() {
@@ -157,10 +188,23 @@ const statusHTML = `<!DOCTYPE html>
             });
         }
 
+        function updateTypeButtons() {
+            document.querySelectorAll('.type-btn').forEach(b => {
+                const isActive = b.dataset.type === currentType;
+                b.classList.toggle('bg-zinc-900', isActive);
+                b.classList.toggle('text-white', isActive);
+                b.classList.toggle('text-zinc-600', !isActive);
+                b.classList.toggle('hover:bg-zinc-100', !isActive);
+            });
+        }
+
         function domainLinks(domains) {
             if (!domains || domains.length === 0) return '<span class="text-zinc-400">—</span>';
             return domains.map(d =>
-                '<a href="https://' + d + '" target="_blank" class="text-zinc-900 hover:text-blue-600 transition-colors block leading-relaxed">' + d + '</a>'
+                '<div class="flex items-center gap-1.5 leading-relaxed group">' +
+                '<a href="https://' + d + '" target="_blank" class="text-zinc-900 hover:text-blue-600 transition-colors">' + d + '</a>' +
+                '<button onclick="copyToClipboard(\'' + d + '\', this)" class="text-zinc-300 hover:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">' + icons.copy + '</button>' +
+                '</div>'
             ).join('');
         }
 
@@ -213,6 +257,10 @@ const statusHTML = `<!DOCTYPE html>
                 services = services.filter(s => !s.managed);
             }
 
+            if (currentType !== 'all') {
+                services = services.filter(s => s.type === currentType);
+            }
+
             services = services.slice().sort((a, b) => getFirstDomain(a).localeCompare(getFirstDomain(b)));
 
             const showConfig = !!codeEditorUrl;
@@ -225,7 +273,7 @@ const statusHTML = `<!DOCTYPE html>
                     <tr class="hover:bg-zinc-50/50 transition-colors">
                         <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
                         <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
-                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).map(a => '<span class="block leading-relaxed">' + a + '</span>').join('') || '<span class="text-zinc-300">—</span>'}</td>
+                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).map(a => '<div class="flex items-center gap-1.5 leading-relaxed group"><span>' + a + '</span><button onclick="copyToClipboard(\'' + a + '\', this)" class="text-zinc-300 hover:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">' + icons.copy + '</button></div>').join('') || '<span class="text-zinc-300">—</span>'}</td>
                         <td class="px-4 py-3"><div class="flex items-center gap-2">${optionIcons(svc)}</div></td>
                         ${showConfig ? '<td class="config-cell px-4 py-3 text-center">' + configLink(svc) + '</td>' : ''}
                     </tr>
@@ -264,11 +312,28 @@ const statusHTML = `<!DOCTYPE html>
             }
         }
 
+        function updateHash() {
+            const parts = [];
+            if (currentFilter !== 'all') parts.push(currentFilter);
+            else if (currentType !== 'all') parts.push('all');
+            if (currentType !== 'all') parts.push(currentType);
+            window.location.hash = parts.join(',');
+        }
+
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 currentFilter = btn.dataset.filter;
-                window.location.hash = currentFilter === 'all' ? '' : currentFilter;
+                updateHash();
                 updateFilterButtons();
+                renderServices();
+            });
+        });
+
+        document.querySelectorAll('.type-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentType = btn.dataset.type;
+                updateHash();
+                updateTypeButtons();
                 renderServices();
             });
         });
