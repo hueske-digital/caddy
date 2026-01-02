@@ -199,6 +199,7 @@ Full end-to-end tests with Docker containers:
 | External type | Config created in `hosts/external/` |
 | Cloudflare type | Config includes `import cloudflare` directive |
 | Logging option | `CADDY_LOGGING=true` adds `import logging` |
+| Auth option | `CADDY_AUTH=true` adds `import auth` (all types) |
 | Disabled options | `CADDY_TLS/COMPRESSION/HEADER=false` removes imports |
 | Multiple domains | Comma-separated domains all included in config |
 | File ownership | Files created with UID/GID 1000:1000 (Linux only) |

@@ -230,34 +230,42 @@ func TestWriteConfig_WithLogging(t *testing.T) {
 }
 
 func TestWriteConfig_WithAuth(t *testing.T) {
-	tmpDir := t.TempDir()
-	mgr := NewCaddyManager(tmpDir, nil)
+	// Test auth for all three types
+	types := []string{"internal", "external", "cloudflare"}
 
-	cfg := &CaddyConfig{
-		Network:     "test_caddy",
-		Container:   "test-container",
-		Domains:     []string{"test.example.com"},
-		Type:        "internal",
-		Upstream:    "test-container:80",
-		TLS:         true,
-		Compression: true,
-		Header:      true,
-		Auth:        true,
-	}
+	for _, typ := range types {
+		t.Run(typ, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			mgr := NewCaddyManager(tmpDir, nil)
 
-	err := mgr.WriteConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+			cfg := &CaddyConfig{
+				Network:     "test_caddy",
+				Container:   "test-container",
+				Domains:     []string{"test.example.com"},
+				Type:        typ,
+				Upstream:    "test-container:80",
+				TLS:         true,
+				Compression: true,
+				Header:      true,
+				Auth:        true,
+			}
 
-	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read config: %v", err)
-	}
+			err := mgr.WriteConfig(cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	if !strings.Contains(string(content), "import auth") {
-		t.Error("expected import auth when auth is true")
+			path := filepath.Join(tmpDir, typ, "test-container_test_caddy.conf")
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("failed to read config: %v", err)
+			}
+
+			contentStr := string(content)
+			if !strings.Contains(contentStr, "import auth") {
+				t.Errorf("expected import auth for type %s", typ)
+			}
+		})
 	}
 }
 

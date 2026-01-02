@@ -497,6 +497,102 @@ EOF
     docker compose -p "$COMPOSE_PROJECT" down
 }
 
+test_auth_option() {
+    run_test "Auth option adds import auth (all types)"
+
+    cd "$TEST_DIR"
+    HOSTS_DIR="$PROJECT_DIR/hosts"
+
+    # Test internal type with auth
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-auth-internal.example.com
+      - CADDY_TYPE=internal
+      - CADDY_PORT=80
+      - CADDY_AUTH=true
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    wait_for "[ -f '$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+
+    if grep -q "import auth" "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"; then
+        log_pass "Internal type: import auth present"
+    else
+        log_fail "Internal type: import auth missing"
+        cat "$HOSTS_DIR/internal/${COMPOSE_PROJECT}_caddy.conf"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+    sleep 2
+
+    # Test external type with auth
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-auth-external.example.com
+      - CADDY_TYPE=external
+      - CADDY_PORT=80
+      - CADDY_AUTH=true
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    wait_for "[ -f '$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+
+    if grep -q "import auth" "$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf"; then
+        log_pass "External type: import auth present"
+    else
+        log_fail "External type: import auth missing"
+        cat "$HOSTS_DIR/external/${COMPOSE_PROJECT}_caddy.conf"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+    sleep 2
+
+    # Test cloudflare type with auth
+    cat > docker-compose.yml << 'EOF'
+services:
+  testapp:
+    image: nginx:alpine
+    environment:
+      - CADDY_DOMAIN=test-auth-cloudflare.example.com
+      - CADDY_TYPE=cloudflare
+      - CADDY_PORT=80
+      - CADDY_AUTH=true
+    networks:
+      - caddy
+
+networks:
+  caddy:
+EOF
+
+    docker compose -p "$COMPOSE_PROJECT" up -d
+    wait_for "[ -f '$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf' ]" 10
+
+    if grep -q "import auth" "$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf"; then
+        log_pass "Cloudflare type: import auth present"
+    else
+        log_fail "Cloudflare type: import auth missing"
+        cat "$HOSTS_DIR/cloudflare/${COMPOSE_PROJECT}_caddy.conf"
+    fi
+
+    docker compose -p "$COMPOSE_PROJECT" down
+}
+
 test_status_api() {
     run_test "Status API returns JSON"
 
@@ -571,6 +667,7 @@ main() {
     test_external_type
     test_cloudflare_type
     test_logging_option
+    test_auth_option
     test_disabled_options
     test_multiple_domains
     test_file_ownership
