@@ -45,12 +45,11 @@ func main() {
 	}
 
 	// Set onChange callback for allowlist manager
-	// configKey format is "container_network"
 	allowlistMgr.onChange = func(configKey string) {
-		// Extract network from configKey (everything after the last underscore)
-		network := configKey
-		if idx := strings.LastIndex(configKey, "_"); idx > 0 {
-			network = configKey[idx+1:]
+		network := allowlistMgr.GetNetwork(configKey)
+		if network == "" {
+			log.Printf("Warning: no network found for %s", configKey)
+			return
 		}
 		log.Printf("Allowlist IPs changed for %s, regenerating config...", configKey)
 		if err := regenerateConfigForNetwork(ctx, docker, caddyMgr, network, cfg); err != nil {

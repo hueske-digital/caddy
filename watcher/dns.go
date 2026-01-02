@@ -177,6 +177,17 @@ func (m *AllowlistManager) GetEntries(configKey string) []string {
 	return nil
 }
 
+// GetNetwork returns the network name for a config key
+func (m *AllowlistManager) GetNetwork(configKey string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if cfg, ok := m.configs[configKey]; ok {
+		return cfg.Network
+	}
+	return ""
+}
+
 // Start begins periodic DNS resolution
 func (m *AllowlistManager) Start(ctx context.Context) {
 	ticker := time.NewTicker(m.refreshInterval)
