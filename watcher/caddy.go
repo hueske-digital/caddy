@@ -98,6 +98,14 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 		}
 	}
 
+	// Unregister from allowlist manager if allowlist was removed
+	if oldCfg, exists := m.configs[cfg.ConfigKey()]; exists && len(oldCfg.Allowlist) > 0 && len(cfg.Allowlist) == 0 {
+		if m.allowlistManager != nil {
+			m.allowlistManager.Unregister(cfg.ConfigKey())
+			log.Printf("Unregistered allowlist for %s (removed)", cfg.ConfigKey())
+		}
+	}
+
 	// Get template for this type
 	tmpl, ok := templates[cfg.Type]
 	if !ok {
@@ -350,14 +358,14 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				network = configKey[idx+1:]
 			}
 
-			// Get allowlist entries if available
-			var allowlist []string
-			if m.allowlistManager != nil {
-				allowlist = m.allowlistManager.GetEntries(configKey)
-			}
-
 			// Check if this is a managed (watcher-generated) config
 			cfg, isManaged := m.configs[configKey]
+
+			// Get allowlist from stored config (most accurate source)
+			var allowlist []string
+			if isManaged && len(cfg.Allowlist) > 0 {
+				allowlist = cfg.Allowlist
+			}
 
 			// Build config info
 			info := ConfigInfo{
