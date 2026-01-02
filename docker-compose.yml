@@ -35,6 +35,8 @@ services:
       - CADDY_PORT=${CADDY_PORT:-8080}
       # Optional: link config files to code editor (e.g., https://code.example.com/?folder=/files)
       - CODE_EDITOR_URL=${CODE_EDITOR_URL:-}
+      # Optional: domains to generate wildcard certificates for (comma-separated)
+      - WILDCARD_DOMAINS=${WILDCARD_DOMAINS:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./hosts:/hosts

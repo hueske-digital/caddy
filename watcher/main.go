@@ -71,6 +71,15 @@ func main() {
 		cancel()
 	}()
 
+	// Generate wildcard certificate configs if configured
+	if len(cfg.WildcardDomains) > 0 {
+		log.Printf("Generating wildcard configs for: %v", cfg.WildcardDomains)
+		if err := caddyMgr.WriteWildcardConfigs(cfg.WildcardDomains); err != nil {
+			log.Printf("Warning: failed to write wildcard configs: %v", err)
+		}
+		statusMgr.SetWildcardDomains(cfg.WildcardDomains)
+	}
+
 	// Initial processing of existing networks
 	log.Println("Starting up, processing existing networks...")
 	if err := processExistingNetworks(ctx, docker, caddyMgr, statusMgr, cfg); err != nil {

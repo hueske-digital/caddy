@@ -37,8 +37,9 @@ type Config struct {
 	CaddyContainer     string
 	NetworkSuffix      string
 	HostsDir           string
-	DNSRefreshInterval int    // seconds, default 60
-	CodeEditorURL      string // optional, base URL for code editor links
+	DNSRefreshInterval int      // seconds, default 60
+	CodeEditorURL      string   // optional, base URL for code editor links
+	WildcardDomains    []string // optional, domains to generate wildcard certs for
 }
 
 // CaddyConfig holds the parsed configuration for a service
@@ -96,12 +97,16 @@ func LoadConfig() (*Config, error) {
 	// Optional code editor URL for linking to config files
 	codeEditorURL := os.Getenv("CODE_EDITOR_URL")
 
+	// Optional wildcard domains for automatic wildcard cert generation
+	wildcardDomains := splitCommaSeparated(os.Getenv("WILDCARD_DOMAINS"))
+
 	return &Config{
 		CaddyContainer:     caddyContainer,
 		NetworkSuffix:      networkSuffix,
 		HostsDir:           hostsDir,
 		DNSRefreshInterval: dnsRefreshInterval,
 		CodeEditorURL:      codeEditorURL,
+		WildcardDomains:    wildcardDomains,
 	}, nil
 }
 

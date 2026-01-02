@@ -70,8 +70,6 @@ networks:
   caddy:
 ```
 
-> **Note:** `CADDY_TLS=false` disables the Cloudflare DNS challenge, not TLS itself. Caddy will use HTTP challenge instead. Use this for publicly accessible domains that don't require wildcards.
-
 ### Types
 
 | Type | Access |
@@ -98,6 +96,17 @@ Place custom `.conf` files in:
 - `hosts/internal/` - internal services
 - `hosts/external/` - public services
 - `hosts/cloudflare/` - Cloudflare-proxied services
+
+## Wildcard Certificates
+
+For many subdomains of the same domain, use wildcard certificates to avoid rate limits and keep subdomains private (not exposed in Certificate Transparency logs):
+
+```bash
+# In .env or docker-compose.yml
+WILDCARD_DOMAINS=example.com,other.com
+```
+
+This generates configs in `hosts/external/` that obtain wildcard certs via DNS challenge. All services using subdomains (e.g., `app.example.com`, `api.example.com`) automatically use the wildcard cert (Caddy 2.10+).
 
 Available snippets (defined in `hosts/base.conf`):
 
@@ -164,6 +173,7 @@ Set `CADDY_DOMAIN` in `.env` to enable the built-in status page. Defaults to `in
 | `HOSTS_DIR` | `/hosts` | Config output directory |
 | `DNS_REFRESH_INTERVAL` | `60` | Seconds between DNS refreshes |
 | `CODE_EDITOR_URL` | - | Base URL for editor links in status page |
+| `WILDCARD_DOMAINS` | - | Domains for wildcard certificates (comma-separated) |
 
 ### Optional (`.env`)
 

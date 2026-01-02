@@ -25,10 +25,11 @@ type ServiceStatus struct {
 
 // Status represents the status structure
 type Status struct {
-	Services      []ServiceStatus `json:"services"`
-	Summary       StatusSummary   `json:"summary"`
-	Updated       string          `json:"updated"`
-	CodeEditorURL string          `json:"codeEditorUrl,omitempty"`
+	Services        []ServiceStatus `json:"services"`
+	WildcardDomains []string        `json:"wildcardDomains,omitempty"`
+	Summary         StatusSummary   `json:"summary"`
+	Updated         string          `json:"updated"`
+	CodeEditorURL   string          `json:"codeEditorUrl,omitempty"`
 }
 
 // StatusSummary provides quick stats
@@ -43,9 +44,10 @@ type StatusSummary struct {
 
 // StatusManager manages the status in memory
 type StatusManager struct {
-	current       *Status
-	codeEditorURL string
-	mu            sync.RWMutex
+	current         *Status
+	codeEditorURL   string
+	wildcardDomains []string
+	mu              sync.RWMutex
 }
 
 // NewStatusManager creates a new StatusManager
@@ -106,11 +108,19 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 	}
 
 	m.current = &Status{
-		Services:      services,
-		Summary:       summary,
-		Updated:       time.Now().Format(time.RFC3339),
-		CodeEditorURL: m.codeEditorURL,
+		Services:        services,
+		WildcardDomains: m.wildcardDomains,
+		Summary:         summary,
+		Updated:         time.Now().Format(time.RFC3339),
+		CodeEditorURL:   m.codeEditorURL,
 	}
+}
+
+// SetWildcardDomains updates the wildcard domains in the status
+func (m *StatusManager) SetWildcardDomains(domains []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.wildcardDomains = domains
 }
 
 // GetJSON returns the current status as JSON bytes
