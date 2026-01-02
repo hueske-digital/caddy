@@ -59,7 +59,7 @@ func (d *DockerClient) ConnectToNetwork(networkName, containerName string) error
 		}
 		return err
 	}
-	log.Printf("Connected to %s", networkName)
+	log.Printf("Caddy connected to %s", networkName)
 	return nil
 }
 
@@ -73,7 +73,7 @@ func (d *DockerClient) DisconnectFromNetwork(networkName, containerName string) 
 		}
 		return err
 	}
-	log.Printf("Disconnected from %s", networkName)
+	log.Printf("Caddy disconnected from %s", networkName)
 	return nil
 }
 
@@ -201,6 +201,7 @@ func watchEvents(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManag
 
 // startCleanupLoop runs periodic cleanup of orphaned networks
 func startCleanupLoop(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
+	log.Println("Cleanup loop scheduled (every 5 minutes)")
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
@@ -258,6 +259,8 @@ func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statu
 			// Remove config for this network
 			if err := caddyMgr.RemoveConfig(networkName); err != nil {
 				log.Printf("Cleanup: failed to remove config for %s: %v", networkName, err)
+			} else {
+				log.Printf("Cleanup: removed config for %s", networkName)
 			}
 
 			// Update status
@@ -306,6 +309,8 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		// Remove config for this network
 		if err := caddyMgr.RemoveConfig(networkName); err != nil {
 			log.Printf("Failed to remove config for %s: %v", networkName, err)
+		} else {
+			log.Printf("Removed config for %s", networkName)
 		}
 
 		// Update status
