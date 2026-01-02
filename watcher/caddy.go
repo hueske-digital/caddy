@@ -117,6 +117,9 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if cfg.Auth {
 		imports = append(imports, "    import auth")
 	}
+	if cfg.SEO {
+		imports = append(imports, "    import seo")
+	}
 	content = strings.ReplaceAll(content, "{{IMPORTS}}", strings.Join(imports, "\n"))
 
 	// Handle allowlist placeholder (external type only)
