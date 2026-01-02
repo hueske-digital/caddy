@@ -199,6 +199,73 @@ func watchEvents(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManag
 	}
 }
 
+// startCleanupLoop runs periodic cleanup of orphaned networks
+func startCleanupLoop(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanupOrphanedNetworks(docker, caddyMgr, statusMgr, cfg)
+		}
+	}
+}
+
+// cleanupOrphanedNetworks finds and cleans up networks with no service containers
+func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
+	networks, err := docker.ListProxyNetworks(cfg.NetworkSuffix)
+	if err != nil {
+		log.Printf("Cleanup: failed to list networks: %v", err)
+		return
+	}
+
+	for _, networkName := range networks {
+		containers, err := docker.GetNetworkContainers(networkName)
+		if err != nil {
+			continue
+		}
+
+		// Check if only Caddy (or no containers) remain
+		hasServiceContainers := false
+		for _, c := range containers {
+			for _, name := range c.Names {
+				if strings.TrimPrefix(name, "/") != cfg.CaddyContainer {
+					hasServiceContainers = true
+					break
+				}
+			}
+			if hasServiceContainers {
+				break
+			}
+		}
+
+		if !hasServiceContainers {
+			log.Printf("Cleanup: network %s has no service containers, cleaning up", networkName)
+
+			// Disconnect Caddy from network
+			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
+				log.Printf("Cleanup: failed to disconnect from %s: %v", networkName, err)
+			}
+
+			// Remove the network
+			if err := docker.RemoveNetwork(networkName); err != nil {
+				log.Printf("Cleanup: failed to remove network %s: %v", networkName, err)
+			}
+
+			// Remove config for this network
+			if err := caddyMgr.RemoveConfig(networkName); err != nil {
+				log.Printf("Cleanup: failed to remove config for %s: %v", networkName, err)
+			}
+
+			// Update status
+			statusMgr.Update(caddyMgr.ListConfigs())
+		}
+	}
+}
+
 func handleEvent(ctx context.Context, event events.Message, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
 	switch event.Type {
 	case "network":
@@ -322,34 +389,6 @@ func handleContainerStart(ctx context.Context, event events.Message, docker *Doc
 		return
 	}
 
-	// Get container's networks
-	networks, err := docker.GetContainerNetworks(event.Actor.ID)
-	if err != nil {
-		log.Printf("Failed to get networks for %s: %v", containerName, err)
-		return
-	}
-
-	// Check each network
-	hasProxyNetwork := false
-	for _, network := range networks {
-		if !strings.HasSuffix(network, cfg.NetworkSuffix) {
-			continue
-		}
-		hasProxyNetwork = true
-
-		log.Printf("Container %s started in %s - checking for CADDY_* config...", containerName, network)
-
-		// Generate config for this network (with retry)
-		if err := generateConfigsForNetworkWithRetry(ctx, docker, caddyMgr, network, cfg); err != nil {
-			log.Printf("Failed to generate config for %s: %v", network, err)
-		}
-	}
-
-	if !hasProxyNetwork {
-		log.Printf("Ignoring container %s: not in any *%s network", containerName, cfg.NetworkSuffix)
-		return
-	}
-
-	// Update status
-	statusMgr.Update(caddyMgr.ListConfigs())
+	// For non-Caddy containers, config generation is handled by network:connect event
+	// No need to duplicate it here
 }

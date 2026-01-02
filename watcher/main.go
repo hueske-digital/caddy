@@ -88,6 +88,9 @@ func main() {
 	statusMgr.Update(caddyMgr.ListConfigs())
 	log.Println("Initial processing complete")
 
+	// Start cleanup loop for orphaned networks (every 5 minutes)
+	go startCleanupLoop(ctx, docker, caddyMgr, statusMgr, cfg)
+
 	// Start event loop
 	log.Println("Watching for events...")
 	if err := watchEvents(ctx, docker, caddyMgr, statusMgr, cfg); err != nil && err != context.Canceled {
