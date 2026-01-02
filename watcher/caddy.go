@@ -116,9 +116,12 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if cfg.Header {
 		imports = append(imports, "    import header")
 	}
-	if cfg.Auth && len(cfg.AuthGroups) == 0 {
-		// Only import auth if no auth_groups (otherwise we inline forward_auth)
-		imports = append(imports, "    import auth")
+	if cfg.Auth {
+		// For external: always import auth (directive ordering works)
+		// For internal/cloudflare with auth_groups: skip (we inline forward_auth in route block)
+		if cfg.Type == "external" || len(cfg.AuthGroups) == 0 {
+			imports = append(imports, "    import auth")
+		}
 	}
 	content = strings.ReplaceAll(content, "{{IMPORTS}}", strings.Join(imports, "\n"))
 
@@ -164,16 +167,15 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	return nil
 }
 
-// generateAllowlistBlock generates the allowlist block for a config
+// generateAllowlistBlock generates the allowlist block for external type
 func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
-	// If no allowlist, just return simple reverse_proxy
-	if len(cfg.Allowlist) == 0 {
-		return fmt.Sprintf("\n    reverse_proxy %s", cfg.Upstream)
+	// This function only applies to external type
+	if cfg.Type != "external" {
+		return ""
 	}
 
-	// Warn if allowlist is used with non-external type
-	if cfg.Type != "external" {
-		log.Printf("Warning: CADDY_ALLOWLIST is only supported for type 'external', ignoring for %s (type: %s)", cfg.Network, cfg.Type)
+	// No allowlist - simple reverse_proxy
+	if len(cfg.Allowlist) == 0 {
 		return fmt.Sprintf("\n    reverse_proxy %s", cfg.Upstream)
 	}
 
@@ -185,7 +187,6 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 
 	// If no resolved IPs yet, resolve now
 	if len(ips) == 0 {
-		// Register with allowlist manager for future updates
 		if m.allowlistManager != nil {
 			m.allowlistManager.Register(cfg)
 			ips = m.allowlistManager.GetResolvedIPs(cfg.ConfigKey())
@@ -212,17 +213,16 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 }
 
 // generateAuthGroupsBlock generates the auth groups check block for external type
+// Note: internal/cloudflare use generateHandleContent with route block for proper ordering
 func (m *CaddyManager) generateAuthGroupsBlock(cfg *CaddyConfig) string {
 	// Only for external type - internal/cloudflare use generateHandleContent
 	if cfg.Type != "external" || len(cfg.AuthGroups) == 0 {
 		return ""
 	}
 
-	// Build regex pattern for groups: (^|,)(group1|group2)($|,)
-	// This matches groups in a comma-separated list
+	// For external type, Caddy's default directive ordering works:
+	// forward_auth runs first (from import auth), then respond checks the header
 	groupPattern := strings.Join(cfg.AuthGroups, "|")
-
-	// Simple approach: respond 403 if NOT in allowed groups
 	return fmt.Sprintf(`
     @unauthorized_group not header_regexp Remote-Groups "(^|,)(%s)($|,)"
     respond @unauthorized_group "Forbidden - group not allowed" 403`, groupPattern)
@@ -234,7 +234,11 @@ func (m *CaddyManager) generateHandleContent(cfg *CaddyConfig) string {
 	// to ensure the group check happens AFTER forward_auth sets the header
 	if len(cfg.AuthGroups) > 0 {
 		groupPattern := strings.Join(cfg.AuthGroups, "|")
+		// Strip incoming Remote-* headers for security (prevent header injection)
 		return fmt.Sprintf(`        route {
+            request_header -Remote-User
+            request_header -Remote-Email
+            request_header -Remote-Groups
             forward_auth {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000 {
                 uri /api/auth/caddy
                 copy_headers Remote-User Remote-Email Remote-Groups
