@@ -619,6 +619,50 @@ func TestWriteConfig_Allowlist(t *testing.T) {
 	}
 }
 
+func TestWriteConfig_AllowlistDNSFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	// Use unresolvable hostname - should fail-closed with private_ranges only
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		Allowlist:   []string{"this-hostname-does-not-exist-xyz123.invalid"},
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+	// Must have private_ranges (fail-closed, not open)
+	if !strings.Contains(contentStr, "private_ranges") {
+		t.Error("expected private_ranges even when DNS fails")
+	}
+	// Must have abort (fail-closed)
+	if !strings.Contains(contentStr, "abort") {
+		t.Error("expected abort when DNS fails (fail-closed)")
+	}
+	// Should NOT have the unresolved hostname as an IP
+	if strings.Contains(contentStr, "this-hostname-does-not-exist") {
+		t.Error("hostname should not appear in config")
+	}
+}
+
 func TestWriteConfig_WithSEO(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
