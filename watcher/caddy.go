@@ -228,14 +228,21 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		}
 	}
 
-	// If still no IPs, return simple reverse_proxy (fallback)
+	// Generate allowlist block (private_ranges always allowed for internal access)
+	// Even if DNS fails, we still restrict to private_ranges - never fall back to open access
 	if len(ips) == 0 {
-		log.Printf("Warning: no resolved IPs for allowlist in %s, falling back to open access", cfg.Network)
+		log.Printf("Warning: no resolved IPs for allowlist in %s, restricting to private_ranges only", cfg.ConfigKey())
 		return fmt.Sprintf(`
-    reverse_proxy %s`, cfg.Upstream)
+    @allowed {
+        remote_ip private_ranges
+    }
+
+    handle @allowed {
+        reverse_proxy %s
+    }
+    abort`, cfg.Upstream)
 	}
 
-	// Generate allowlist block (private_ranges always allowed for internal access)
 	ipList := FormatAllowlistMatcher(ips)
 	return fmt.Sprintf(`
     @allowed {
