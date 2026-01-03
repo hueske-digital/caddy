@@ -118,38 +118,21 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	typ := env["CADDY_TYPE"]
 	port := env["CADDY_PORT"]
 
-	// Check if any CADDY_* variable is set
-	hasCaddyVars := domain != "" || typ != "" || port != ""
-	if !hasCaddyVars {
-		return nil, nil // No CADDY_* variables, ignore silently
+	// CADDY_DOMAIN is the trigger - without it, skip silently
+	if domain == "" {
+		return nil, nil
 	}
 
-	// All three are required if any is set
-	if domain == "" || typ == "" || port == "" {
-		var found []string
-		if domain != "" {
-			found = append(found, "CADDY_DOMAIN="+domain)
-		}
-		if typ != "" {
-			found = append(found, "CADDY_TYPE="+typ)
-		}
-		if port != "" {
-			found = append(found, "CADDY_PORT="+port)
-		}
-
+	// With CADDY_DOMAIN set, TYPE and PORT are required
+	if typ == "" || port == "" {
 		var missing []string
-		if domain == "" {
-			missing = append(missing, "CADDY_DOMAIN")
-		}
 		if typ == "" {
 			missing = append(missing, "CADDY_TYPE")
 		}
 		if port == "" {
 			missing = append(missing, "CADDY_PORT")
 		}
-
-		return nil, fmt.Errorf("missing %s (found %s). Remove all CADDY_* to skip",
-			strings.Join(missing, ", "), strings.Join(found, ", "))
+		return nil, fmt.Errorf("missing %s (CADDY_DOMAIN=%s)", strings.Join(missing, ", "), domain)
 	}
 
 	// Validate type

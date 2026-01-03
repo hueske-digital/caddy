@@ -75,14 +75,18 @@ func TestParseCaddyEnv_NoCaddyVars(t *testing.T) {
 }
 
 func TestParseCaddyEnv_MissingDomain(t *testing.T) {
+	// Without CADDY_DOMAIN, container should be skipped silently (nil, nil)
 	env := map[string]string{
 		"CADDY_TYPE": "internal",
 		"CADDY_PORT": "8080",
 	}
 
-	_, err := ParseCaddyEnv(env, "test_caddy", "test-container")
-	if err == nil {
-		t.Error("expected error when domain is missing")
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Errorf("expected nil error when domain is missing, got: %v", err)
+	}
+	if cfg != nil {
+		t.Error("expected nil config when domain is missing")
 	}
 }
 
