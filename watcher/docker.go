@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -56,6 +57,10 @@ func (d *DockerClient) ConnectToNetwork(networkName, containerName string) error
 		// Check if already connected
 		if strings.Contains(err.Error(), "already exists") {
 			return nil
+		}
+		// Container not running
+		if strings.Contains(err.Error(), "network sandbox") {
+			return fmt.Errorf("container %s not running (check config errors)", containerName)
 		}
 		return err
 	}
