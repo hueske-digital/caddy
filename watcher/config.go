@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -118,8 +119,9 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	typ := env["CADDY_TYPE"]
 	port := env["CADDY_PORT"]
 
-	// CADDY_DOMAIN is the trigger - without it, skip silently
+	// CADDY_DOMAIN is the trigger - without it, skip
 	if domain == "" {
+		log.Printf("Skipping %s (no CADDY_DOMAIN)", strings.TrimPrefix(containerName, "/"))
 		return nil, nil
 	}
 
