@@ -125,14 +125,31 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	}
 
 	// All three are required if any is set
-	if domain == "" {
-		return nil, fmt.Errorf("CADDY_DOMAIN is required")
-	}
-	if typ == "" {
-		return nil, fmt.Errorf("CADDY_TYPE is required")
-	}
-	if port == "" {
-		return nil, fmt.Errorf("CADDY_PORT is required")
+	if domain == "" || typ == "" || port == "" {
+		var found []string
+		if domain != "" {
+			found = append(found, "CADDY_DOMAIN="+domain)
+		}
+		if typ != "" {
+			found = append(found, "CADDY_TYPE="+typ)
+		}
+		if port != "" {
+			found = append(found, "CADDY_PORT="+port)
+		}
+
+		var missing []string
+		if domain == "" {
+			missing = append(missing, "CADDY_DOMAIN")
+		}
+		if typ == "" {
+			missing = append(missing, "CADDY_TYPE")
+		}
+		if port == "" {
+			missing = append(missing, "CADDY_PORT")
+		}
+
+		return nil, fmt.Errorf("missing %s (found %s). Remove all CADDY_* to skip",
+			strings.Join(missing, ", "), strings.Join(found, ", "))
 	}
 
 	// Validate type
