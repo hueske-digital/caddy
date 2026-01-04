@@ -10,6 +10,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - COMPOSE_PROJECT_NAME
+      - LOG_LEVEL=${LOG_LEVEL:-WARN}
     env_file:
       - .env
     entrypoint: /docker/entrypoint.sh
