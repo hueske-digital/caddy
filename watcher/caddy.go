@@ -411,19 +411,13 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 
 			// Build config info
 			info := ConfigInfo{
-				Network:     network,
-				Container:   container,
-				Type:        t,
-				Domains:     domains,
-				Allowlist:   allowlist,
-				Path:        path,
-				TLS:         true, // defaults
-				Compression: true,
-				Header:      true,
-				Performance: true,
-				Security:    true,
-				SEO:         true, // assume indexable unless noindex is set
-				Managed:     isManaged,
+				Network:   network,
+				Container: container,
+				Type:      t,
+				Domains:   domains,
+				Allowlist: allowlist,
+				Path:      path,
+				Managed:   isManaged,
 			}
 
 			// Use stored config for feature flags (managed configs only)
@@ -440,6 +434,12 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.Performance = cfg.Performance
 				info.Security = cfg.Security
 				info.WordPress = cfg.WordPress
+			} else {
+				// Parse imports from manual config file
+				content, err := os.ReadFile(path)
+				if err == nil {
+					parseImportsFromContent(string(content), &info)
+				}
 			}
 
 			result = append(result, info)
@@ -447,6 +447,51 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 	}
 
 	return result
+}
+
+// parseImportsFromContent parses import statements from config content
+// and sets the corresponding flags in ConfigInfo
+func parseImportsFromContent(content string, info *ConfigInfo) {
+	// Default: SEO is true (indexable) unless noindex is imported
+	info.SEO = true
+
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "import ") {
+			continue
+		}
+
+		importName := strings.TrimPrefix(line, "import ")
+		importName = strings.TrimSpace(importName)
+
+		switch importName {
+		case "logging":
+			info.Logging = true
+		case "tls":
+			info.TLS = true
+		case "compression":
+			info.Compression = true
+		case "header":
+			info.Header = true
+		case "noindex":
+			info.SEO = false
+		case "performance":
+			info.Performance = true
+		case "security":
+			info.Security = true
+		case "wordpress":
+			info.WordPress = true
+		case "auth":
+			info.Auth = true
+		}
+	}
+
+	// Check for www redirect (separate server block with redir)
+	// Pattern: www.domain { ... redir https://domain ... }
+	if strings.Contains(content, "www.") && strings.Contains(content, "redir ") && strings.Contains(content, "permanent") {
+		info.WWWRedirect = true
+	}
 }
 
 // extractDomainsFromConfig reads a config file and extracts domains
