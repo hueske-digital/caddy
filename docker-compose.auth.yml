@@ -19,6 +19,8 @@ services:
       - PROVIDERS_POCKETID_NAME=Pocket ID
       - OAUTH_AUTO_REDIRECT=pocketid
       - DISABLE_ANALYTICS=true
+      - APP_TITLE=${TINYAUTH_APP_TITLE:-}
+      - BACKGROUND_IMAGE=${TINYAUTH_BACKGROUND_IMAGE:-}
       # Caddy auto-discovery
       - CADDY_DOMAIN=${TINYAUTH_DOMAIN}
       - CADDY_TYPE=${TINYAUTH_TYPE:-external}
