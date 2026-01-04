@@ -1084,20 +1084,53 @@ func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
 	}
 }
 
-func TestGeneratePathBasedAuth(t *testing.T) {
-	paths := []string{"/admin/*", "/api/private/*"}
-	result := generatePathBasedAuth(paths)
+func TestGenerateAuthBlock(t *testing.T) {
+	t.Run("path-based with local auth", func(t *testing.T) {
+		paths := []string{"/admin/*", "/api/private/*"}
+		result := generateAuthBlock("", paths)
 
-	if !strings.Contains(result, "@auth-paths path /admin/* /api/private/*") {
-		t.Error("expected path matcher with all paths")
-	}
-	if !strings.Contains(result, "forward_auth @auth-paths") {
-		t.Error("expected forward_auth with matcher")
-	}
-	if !strings.Contains(result, "uri /api/auth/caddy") {
-		t.Error("expected tinyauth uri")
-	}
-	if !strings.Contains(result, "copy_headers Remote-User Remote-Email Remote-Groups") {
-		t.Error("expected copy_headers directive")
-	}
+		if !strings.Contains(result, "@auth-paths path /admin/* /api/private/*") {
+			t.Error("expected path matcher with all paths")
+		}
+		if !strings.Contains(result, "forward_auth @auth-paths") {
+			t.Error("expected forward_auth with matcher")
+		}
+		if !strings.Contains(result, "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000") {
+			t.Error("expected local tinyauth server")
+		}
+	})
+
+	t.Run("full site with local auth", func(t *testing.T) {
+		result := generateAuthBlock("", nil)
+
+		if strings.Contains(result, "@auth-paths") {
+			t.Error("unexpected path matcher for full site auth")
+		}
+		if !strings.Contains(result, "forward_auth {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000") {
+			t.Error("expected local tinyauth server")
+		}
+	})
+
+	t.Run("full site with custom auth URL", func(t *testing.T) {
+		result := generateAuthBlock("https://login.example.com", nil)
+
+		if !strings.Contains(result, "forward_auth https://login.example.com") {
+			t.Error("expected custom auth URL")
+		}
+		if strings.Contains(result, "tinyauth") {
+			t.Error("unexpected tinyauth reference with custom URL")
+		}
+	})
+
+	t.Run("path-based with custom auth URL", func(t *testing.T) {
+		paths := []string{"/admin", "/admin/*"}
+		result := generateAuthBlock("https://login.example.com", paths)
+
+		if !strings.Contains(result, "@auth-paths path /admin /admin/*") {
+			t.Error("expected path matcher")
+		}
+		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
+			t.Error("expected custom auth URL with path matcher")
+		}
+	})
 }

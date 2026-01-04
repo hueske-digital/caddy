@@ -58,6 +58,7 @@ services:
       # Optional - disabled by default
       - CADDY_ALLOWLIST=home.dyndns.org      # IP allowlist (external only)
       - CADDY_AUTH=true                      # Enable forward auth (requires tinyauth)
+      - CADDY_AUTH_URL=https://login.example.com  # Custom auth server (default: local tinyauth)
       - CADDY_AUTH_PATHS=/admin/*,/api/*     # Protect only these paths (default: entire site)
       - CADDY_SEO=true                       # Allow search engine indexing
       - CADDY_WWW_REDIRECT=true              # Redirect www to non-www

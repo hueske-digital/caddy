@@ -139,12 +139,15 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 		imports = append(imports, "    import header")
 	}
 	if cfg.Auth {
-		if len(cfg.AuthPaths) == 0 {
-			// Protect entire site
+		if cfg.AuthURL != "" {
+			// Custom auth server URL
+			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths))
+		} else if len(cfg.AuthPaths) == 0 {
+			// Protect entire site with local tinyauth
 			imports = append(imports, "    import auth")
 		} else {
-			// Protect only specific paths
-			imports = append(imports, generatePathBasedAuth(cfg.AuthPaths))
+			// Protect only specific paths with local tinyauth
+			imports = append(imports, generateAuthBlock("", cfg.AuthPaths))
 		}
 	}
 	if !cfg.SEO {
@@ -270,14 +273,31 @@ https://www.%s {
 	return strings.Join(blocks, "\n")
 }
 
-// generatePathBasedAuth generates forward_auth for specific paths only
-func generatePathBasedAuth(paths []string) string {
-	pathList := strings.Join(paths, " ")
-	return fmt.Sprintf(`    @auth-paths path %s
-    forward_auth @auth-paths {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000 {
+// generateAuthBlock generates forward_auth directive
+// If authURL is empty, uses local tinyauth container
+// If paths is empty, protects entire site
+func generateAuthBlock(authURL string, paths []string) string {
+	// Determine auth server
+	authServer := "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000"
+	if authURL != "" {
+		authServer = authURL
+	}
+
+	// Full site auth (no paths)
+	if len(paths) == 0 {
+		return fmt.Sprintf(`    forward_auth %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups
-    }`, pathList)
+    }`, authServer)
+	}
+
+	// Path-based auth
+	pathList := strings.Join(paths, " ")
+	return fmt.Sprintf(`    @auth-paths path %s
+    forward_auth @auth-paths %s {
+        uri /api/auth/caddy
+        copy_headers Remote-User Remote-Email Remote-Groups
+    }`, pathList, authServer)
 }
 
 // RemoveConfig removes all Caddyfile configurations for a network

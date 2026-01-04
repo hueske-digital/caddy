@@ -56,6 +56,7 @@ type CaddyConfig struct {
 	Compression bool     // From CADDY_COMPRESSION (optional, default true)
 	Header      bool     // From CADDY_HEADER (optional, default true)
 	Auth        bool     // From CADDY_AUTH (optional, default false)
+	AuthURL     string   // From CADDY_AUTH_URL (optional, custom auth server URL)
 	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
 	SEO         bool     // From CADDY_SEO (optional, default false = noindex)
 	WWWRedirect bool     // From CADDY_WWW_REDIRECT (optional, default false)
@@ -179,6 +180,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	compression := env["CADDY_COMPRESSION"] != "false" // default: on
 	header := env["CADDY_HEADER"] != "false"           // default: on
 	auth := env["CADDY_AUTH"] == "true"                 // default: off
+	authURL := env["CADDY_AUTH_URL"]                    // optional: custom auth server URL
 	seo := env["CADDY_SEO"] == "true"                   // default: off (= noindex)
 	wwwRedirect := env["CADDY_WWW_REDIRECT"] == "true" // default: off
 	performance := env["CADDY_PERFORMANCE"] != "false" // default: on
@@ -200,6 +202,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		Compression: compression,
 		Header:      header,
 		Auth:        auth,
+		AuthURL:     authURL,
 		AuthPaths:   authPaths,
 		SEO:         seo,
 		WWWRedirect: wwwRedirect,

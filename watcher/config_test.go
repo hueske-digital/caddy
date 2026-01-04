@@ -448,3 +448,25 @@ func TestParseCaddyEnv_AuthPathsEmpty(t *testing.T) {
 		t.Errorf("expected no auth paths, got %d", len(cfg.AuthPaths))
 	}
 }
+
+func TestParseCaddyEnv_AuthURL(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN":   "test.example.com",
+		"CADDY_TYPE":     "external",
+		"CADDY_PORT":     "80",
+		"CADDY_AUTH":     "true",
+		"CADDY_AUTH_URL": "https://login.example.com",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Auth {
+		t.Error("expected Auth to be true")
+	}
+	if cfg.AuthURL != "https://login.example.com" {
+		t.Errorf("expected AuthURL 'https://login.example.com', got '%s'", cfg.AuthURL)
+	}
+}
