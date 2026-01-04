@@ -422,6 +422,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				Header:      true,
 				Performance: true,
 				Security:    true,
+				SEO:         true, // assume indexable unless noindex is set
 				Managed:     isManaged,
 			}
 
