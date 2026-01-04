@@ -273,7 +273,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	resolvedProxies := m.resolveTrustedProxies(cfg.TrustedProxies)
 	trustedProxiesLine := ""
 	if len(resolvedProxies) > 0 {
-		trustedProxiesLine = "\n            trusted_proxies private_ranges " + strings.Join(resolvedProxies, " ")
+		trustedProxiesLine = "\n        trusted_proxies private_ranges " + strings.Join(resolvedProxies, " ")
 	}
 
 	// No allowlist - simple or block reverse_proxy
