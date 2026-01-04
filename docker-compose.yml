@@ -33,6 +33,11 @@ services:
       - CADDY_DOMAIN=${CADDY_DOMAIN:-}
       - CADDY_TYPE=${CADDY_TYPE:-internal}
       - CADDY_PORT=${CADDY_PORT:-8080}
+      # Optional: restrict access to specific IPs/hostnames (comma-separated)
+      - CADDY_ALLOWLIST=${CADDY_ALLOWLIST:-}
+      # Optional: enable authentication (requires docker-compose.auth.yml)
+      - CADDY_AUTH=${CADDY_AUTH:-false}
+      - CADDY_AUTH_PATHS=${CADDY_AUTH_PATHS:-}
       # Optional: link config files to code editor (e.g., https://code.example.com/?folder=/files)
       - CODE_EDITOR_URL=${CODE_EDITOR_URL:-}
       # Optional: domains to generate wildcard certificates for (comma-separated)
