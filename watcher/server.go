@@ -159,6 +159,10 @@ const statusHTML = `<!DOCTYPE html>
                             <input type="checkbox" class="opt-filter rounded" data-opt="allowlist" data-field="allowlist">
                             <span class="text-sm">Allowlist</span>
                         </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="trustedProxies" data-field="trustedProxies">
+                            <span class="text-sm">Trusted proxies</span>
+                        </label>
                     </div>
                     <div class="border-t border-zinc-200 p-2">
                         <button id="clear-options" class="w-full px-2 py-1.5 text-sm text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 rounded transition-colors">Clear filters</button>
@@ -212,6 +216,7 @@ const statusHTML = `<!DOCTYPE html>
             seo: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>',
             www: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
             wp: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm4 4h10M7 12h10m-7 4h4"/></svg>',
+            proxy: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>',
             external: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>',
             managed: '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
             manual: '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
@@ -241,7 +246,8 @@ const statusHTML = `<!DOCTYPE html>
             auth: 'Auth',
             seo: 'SEO indexable',
             www: 'www→ redirect',
-            wp: 'WordPress'
+            wp: 'WordPress',
+            proxy: 'Trusted proxies'
         };
 
         function loadFilterFromHash() {
@@ -319,6 +325,15 @@ const statusHTML = `<!DOCTYPE html>
                 authTooltip = 'Auth ✗';
             }
 
+            // Build trusted proxies tooltip with details
+            const hasTrustedProxies = svc.trustedProxies && svc.trustedProxies.length > 0;
+            let proxyTooltip = 'Trusted proxies';
+            if (hasTrustedProxies) {
+                proxyTooltip = 'Trusted proxies ✓ (' + svc.trustedProxies.join(', ') + ')';
+            } else {
+                proxyTooltip = 'Trusted proxies ✗';
+            }
+
             const opts = [
                 { key: 'log', enabled: svc.logging, tooltip: optionInfo.log },
                 { key: 'tls', enabled: svc.tls, tooltip: optionInfo.tls },
@@ -329,7 +344,8 @@ const statusHTML = `<!DOCTYPE html>
                 { key: 'auth', enabled: svc.auth, tooltip: authTooltip },
                 { key: 'seo', enabled: svc.seo, tooltip: optionInfo.seo },
                 { key: 'www', enabled: svc.wwwRedirect, tooltip: optionInfo.www },
-                { key: 'wp', enabled: svc.wordpress, tooltip: optionInfo.wp }
+                { key: 'wp', enabled: svc.wordpress, tooltip: optionInfo.wp },
+                { key: 'proxy', enabled: hasTrustedProxies, tooltip: proxyTooltip }
             ];
             return opts.map(o => {
                 const cls = o.enabled ? 'text-emerald-500' : 'text-zinc-300';
@@ -404,6 +420,9 @@ const statusHTML = `<!DOCTYPE html>
                     return activeFilters.every(field => {
                         if (field === 'allowlist') {
                             return s.allowlist && s.allowlist.length > 0;
+                        }
+                        if (field === 'trustedProxies') {
+                            return s.trustedProxies && s.trustedProxies.length > 0;
                         }
                         return s[field] === true;
                     });

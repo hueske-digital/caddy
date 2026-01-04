@@ -1294,3 +1294,228 @@ func TestGenerateAuthBlock(t *testing.T) {
 		}
 	})
 }
+
+func TestWriteConfig_TrustedProxies_Internal(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:        "test_caddy",
+		Container:      "test-container",
+		Domains:        []string{"test.example.com"},
+		Type:           "internal",
+		Upstream:       "test-container:8080",
+		TLS:            true,
+		Compression:    true,
+		Header:         true,
+		TrustedProxies: []string{"1.2.3.4", "5.6.7.8"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have trusted_proxies directive
+	if !strings.Contains(contentStr, "trusted_proxies private_ranges 1.2.3.4 5.6.7.8") {
+		t.Error("expected trusted_proxies directive with IPs")
+	}
+}
+
+func TestWriteConfig_TrustedProxies_Cloudflare(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:        "test_caddy",
+		Container:      "test-container",
+		Domains:        []string{"test.example.com"},
+		Type:           "cloudflare",
+		Upstream:       "test-container:8080",
+		TLS:            true,
+		Compression:    true,
+		Header:         true,
+		TrustedProxies: []string{"10.0.0.1"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "cloudflare", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have trusted_proxies directive
+	if !strings.Contains(contentStr, "trusted_proxies private_ranges 10.0.0.1") {
+		t.Error("expected trusted_proxies directive")
+	}
+	// Should also have header_up for CF
+	if !strings.Contains(contentStr, "header_up X-Real-IP {header.CF-Connecting-IP}") {
+		t.Error("expected header_up for cloudflare type")
+	}
+}
+
+func TestWriteConfig_TrustedProxies_External(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:        "test_caddy",
+		Container:      "test-container",
+		Domains:        []string{"test.example.com"},
+		Type:           "external",
+		Upstream:       "test-container:8080",
+		TLS:            true,
+		Compression:    true,
+		Header:         true,
+		TrustedProxies: []string{"192.168.1.1"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have trusted_proxies directive in block format
+	if !strings.Contains(contentStr, "trusted_proxies private_ranges 192.168.1.1") {
+		t.Error("expected trusted_proxies directive")
+	}
+}
+
+func TestWriteConfig_TrustedProxies_ExternalWithAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:        "test_caddy",
+		Container:      "test-container",
+		Domains:        []string{"test.example.com"},
+		Type:           "external",
+		Upstream:       "test-container:8080",
+		TLS:            true,
+		Compression:    true,
+		Header:         true,
+		Allowlist:      []string{"1.1.1.1"},
+		TrustedProxies: []string{"192.168.1.1"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have both allowlist and trusted_proxies
+	if !strings.Contains(contentStr, "@allowed") {
+		t.Error("expected @allowed matcher")
+	}
+	if !strings.Contains(contentStr, "trusted_proxies private_ranges 192.168.1.1") {
+		t.Error("expected trusted_proxies directive")
+	}
+}
+
+func TestWriteConfig_NoTrustedProxies(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:8080",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should not have trusted_proxies directive
+	if strings.Contains(contentStr, "trusted_proxies") {
+		t.Error("unexpected trusted_proxies directive when none configured")
+	}
+}
+
+func TestParseImportsFromContent_TrustedProxies(t *testing.T) {
+	content := `# test config
+https://test.example.com {
+    import tls
+    reverse_proxy myapp:8080 {
+        trusted_proxies private_ranges 1.2.3.4 5.6.7.8
+    }
+}`
+
+	info := &ConfigInfo{}
+	parseImportsFromContent(content, info)
+
+	if len(info.TrustedProxies) != 2 {
+		t.Errorf("expected 2 trusted proxies, got %d", len(info.TrustedProxies))
+	}
+	if info.TrustedProxies[0] != "1.2.3.4" || info.TrustedProxies[1] != "5.6.7.8" {
+		t.Errorf("unexpected trusted proxies: %v", info.TrustedProxies)
+	}
+}
+
+func TestParseImportsFromContent_TrustedProxiesNoPrivateRanges(t *testing.T) {
+	content := `# test config
+https://test.example.com {
+    reverse_proxy myapp:8080 {
+        trusted_proxies 10.0.0.1
+    }
+}`
+
+	info := &ConfigInfo{}
+	parseImportsFromContent(content, info)
+
+	if len(info.TrustedProxies) != 1 {
+		t.Errorf("expected 1 trusted proxy, got %d", len(info.TrustedProxies))
+	}
+	if info.TrustedProxies[0] != "10.0.0.1" {
+		t.Errorf("unexpected trusted proxies: %v", info.TrustedProxies)
+	}
+}

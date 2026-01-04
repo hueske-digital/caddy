@@ -57,6 +57,7 @@ services:
       - CADDY_SECURITY=false                 # Disable sensitive file blocking
       # Optional - disabled by default
       - CADDY_ALLOWLIST=home.dyndns.org      # IP allowlist (external only)
+      - CADDY_TRUSTED_PROXIES=192.168.1.1    # IPs/hostnames for X-Forwarded-* trust
       - CADDY_AUTH=true                      # Enable forward auth (requires tinyauth)
       - CADDY_AUTH_URL=https://login.example.com  # Custom auth server (default: local tinyauth)
       - CADDY_AUTH_PATHS=/admin/*,/api/*     # Protect only these paths (default: entire site)
@@ -90,6 +91,20 @@ CADDY_ALLOWLIST=home.dyndns.org,office.example.com,1.2.3.4
 - Hostnames resolved via DNS-over-HTTPS (Cloudflare/Google)
 - Auto-refreshes every 60 seconds
 - Non-matching requests: connection aborted
+
+### Trusted Proxies
+
+When using `CADDY_AUTH_URL` with an external auth server (e.g., on another host), the auth server needs to trust X-Forwarded-* headers from Caddy:
+
+```yaml
+# On the service behind Caddy that runs your auth server
+CADDY_TRUSTED_PROXIES=192.168.1.10,my-proxy.example.com
+```
+
+- Adds `trusted_proxies private_ranges <IPs>` to the reverse_proxy directive
+- Hostnames resolved via DNS-over-HTTPS (like allowlist)
+- Private ranges always trusted by default
+- Required for correct client IP detection when forwarding auth requests
 
 ## Manual Configs
 
@@ -237,6 +252,7 @@ Full end-to-end tests with Docker containers:
 | SEO option | `CADDY_SEO=true` adds `import seo` for indexing |
 | WWW redirect | `CADDY_WWW_REDIRECT=true` adds www to non-www redirect |
 | WordPress option | `CADDY_WORDPRESS=true` adds `import wordpress` |
+| Trusted proxies | `CADDY_TRUSTED_PROXIES` adds `trusted_proxies` to reverse_proxy |
 | Performance/Security | Enabled by default, disable with `=false` |
 | Disabled options | `CADDY_TLS/COMPRESSION/HEADER=false` removes imports |
 | Multiple domains | Comma-separated domains all included in config |

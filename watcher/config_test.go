@@ -470,3 +470,44 @@ func TestParseCaddyEnv_AuthURL(t *testing.T) {
 		t.Errorf("expected AuthURL 'https://login.example.com', got '%s'", cfg.AuthURL)
 	}
 }
+
+func TestParseCaddyEnv_TrustedProxies(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN":          "test.example.com",
+		"CADDY_TYPE":            "external",
+		"CADDY_PORT":            "80",
+		"CADDY_TRUSTED_PROXIES": "192.168.1.1, 10.0.0.1",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.TrustedProxies) != 2 {
+		t.Errorf("expected 2 trusted proxies, got %d", len(cfg.TrustedProxies))
+	}
+	if cfg.TrustedProxies[0] != "192.168.1.1" {
+		t.Errorf("expected first proxy '192.168.1.1', got '%s'", cfg.TrustedProxies[0])
+	}
+	if cfg.TrustedProxies[1] != "10.0.0.1" {
+		t.Errorf("expected second proxy '10.0.0.1', got '%s'", cfg.TrustedProxies[1])
+	}
+}
+
+func TestParseCaddyEnv_TrustedProxiesEmpty(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN": "test.example.com",
+		"CADDY_TYPE":   "external",
+		"CADDY_PORT":   "80",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("expected no trusted proxies, got %d", len(cfg.TrustedProxies))
+	}
+}

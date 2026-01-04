@@ -58,11 +58,12 @@ type CaddyConfig struct {
 	Auth        bool     // From CADDY_AUTH (optional, default false)
 	AuthURL     string   // From CADDY_AUTH_URL (optional, custom auth server URL)
 	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
-	SEO         bool     // From CADDY_SEO (optional, default false = noindex)
-	WWWRedirect bool     // From CADDY_WWW_REDIRECT (optional, default false)
-	Performance bool     // From CADDY_PERFORMANCE (optional, default true)
-	Security    bool     // From CADDY_SECURITY (optional, default true)
-	WordPress   bool     // From CADDY_WORDPRESS (optional, default false)
+	SEO            bool     // From CADDY_SEO (optional, default false = noindex)
+	WWWRedirect    bool     // From CADDY_WWW_REDIRECT (optional, default false)
+	Performance    bool     // From CADDY_PERFORMANCE (optional, default true)
+	Security       bool     // From CADDY_SECURITY (optional, default true)
+	WordPress      bool     // From CADDY_WORDPRESS (optional, default false)
+	TrustedProxies []string // From CADDY_TRUSTED_PROXIES (optional, IPs/hostnames for reverse_proxy)
 }
 
 // ConfigKey returns the unique key for this config (container_network)
@@ -190,6 +191,9 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	// Parse auth paths (optional)
 	authPaths := splitCommaSeparated(env["CADDY_AUTH_PATHS"])
 
+	// Parse trusted proxies (optional, for reverse_proxy block)
+	trustedProxies := splitCommaSeparated(env["CADDY_TRUSTED_PROXIES"])
+
 	return &CaddyConfig{
 		Network:     network,
 		Container:   name,
@@ -204,11 +208,12 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		Auth:        auth,
 		AuthURL:     authURL,
 		AuthPaths:   authPaths,
-		SEO:         seo,
-		WWWRedirect: wwwRedirect,
-		Performance: performance,
-		Security:    security,
-		WordPress:   wordpress,
+		SEO:            seo,
+		WWWRedirect:    wwwRedirect,
+		Performance:    performance,
+		Security:       security,
+		WordPress:      wordpress,
+		TrustedProxies: trustedProxies,
 	}, nil
 }
 

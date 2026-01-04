@@ -59,6 +59,7 @@ caddy/
 | `CADDY_TYPE` | Yes | `external`, `internal`, or `cloudflare` |
 | `CADDY_PORT` | Yes | Container port |
 | `CADDY_ALLOWLIST` | No | IPs/hostnames for allowlist (external only) |
+| `CADDY_TRUSTED_PROXIES` | No | IPs/hostnames for X-Forwarded-* trust |
 
 ## Watcher ENV Variables
 

@@ -25,7 +25,7 @@ var templates = map[string]string{
     import internal
 
     handle @internal {
-        reverse_proxy {{UPSTREAM}}
+{{REVERSE_PROXY_BLOCK}}
     }
     abort
 }
@@ -37,9 +37,7 @@ var templates = map[string]string{
     import cloudflare
 
     handle @cloudflare {
-        reverse_proxy {{UPSTREAM}} {
-            header_up X-Real-IP {header.CF-Connecting-IP}
-        }
+{{REVERSE_PROXY_BLOCK}}
     }
     abort
 }
@@ -56,25 +54,26 @@ type CaddyManager struct {
 
 // ConfigInfo holds information about a configuration file
 type ConfigInfo struct {
-	Network     string
-	Container   string
-	Type        string
-	Domains     []string
-	Allowlist   []string
-	Logging     bool
-	TLS         bool
-	Compression bool
-	Header      bool
-	Auth        bool
-	AuthPaths   []string
-	AuthURL     string
-	SEO         bool
-	WWWRedirect bool
-	Performance bool
-	Security    bool
-	WordPress   bool
-	Path        string
-	Managed     bool
+	Network        string
+	Container      string
+	Type           string
+	Domains        []string
+	Allowlist      []string
+	Logging        bool
+	TLS            bool
+	Compression    bool
+	Header         bool
+	Auth           bool
+	AuthPaths      []string
+	AuthURL        string
+	SEO            bool
+	WWWRedirect    bool
+	Performance    bool
+	Security       bool
+	WordPress      bool
+	TrustedProxies []string
+	Path           string
+	Managed        bool
 }
 
 // NewCaddyManager creates a new CaddyManager
@@ -84,6 +83,53 @@ func NewCaddyManager(hostsDir string, allowlistManager *AllowlistManager) *Caddy
 		allowlistManager: allowlistManager,
 		configs:          make(map[string]*CaddyConfig),
 	}
+}
+
+// resolveTrustedProxies resolves trusted proxies entries (hostnames/IPs) to IPs
+func (m *CaddyManager) resolveTrustedProxies(entries []string) []string {
+	if len(entries) == 0 || m.allowlistManager == nil {
+		return nil
+	}
+
+	var allIPs []string
+	seen := make(map[string]bool)
+
+	for _, entry := range entries {
+		ips := m.allowlistManager.resolveEntry(entry)
+		for _, ip := range ips {
+			if !seen[ip] {
+				seen[ip] = true
+				allIPs = append(allIPs, ip)
+			}
+		}
+	}
+
+	return allIPs
+}
+
+// generateReverseProxyBlock generates the reverse_proxy directive with optional trusted_proxies
+// indent is the base indentation (e.g., "        " for 8 spaces)
+// extraDirective is an optional additional directive inside the block (e.g., "header_up X-Real-IP ...")
+func (m *CaddyManager) generateReverseProxyBlock(cfg *CaddyConfig, indent string, extraDirective string) string {
+	resolvedProxies := m.resolveTrustedProxies(cfg.TrustedProxies)
+
+	// Simple case: no extra directive and no trusted proxies
+	if extraDirective == "" && len(resolvedProxies) == 0 {
+		return indent + "reverse_proxy " + cfg.Upstream
+	}
+
+	// Need block format
+	var lines []string
+	lines = append(lines, indent+"reverse_proxy "+cfg.Upstream+" {")
+	if extraDirective != "" {
+		lines = append(lines, indent+"    "+extraDirective)
+	}
+	if len(resolvedProxies) > 0 {
+		lines = append(lines, indent+"    trusted_proxies private_ranges "+strings.Join(resolvedProxies, " "))
+	}
+	lines = append(lines, indent+"}")
+
+	return strings.Join(lines, "\n")
 }
 
 // WriteConfig writes a Caddyfile configuration for a service
@@ -171,6 +217,15 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	allowlistBlock := m.generateAllowlistBlock(cfg)
 	content = strings.ReplaceAll(content, "{{ALLOWLIST_BLOCK}}", allowlistBlock)
 
+	// Generate reverse_proxy block for internal and cloudflare types
+	if cfg.Type == TypeInternal {
+		rpBlock := m.generateReverseProxyBlock(cfg, "        ", "")
+		content = strings.ReplaceAll(content, "{{REVERSE_PROXY_BLOCK}}", rpBlock)
+	} else if cfg.Type == TypeCloudflare {
+		rpBlock := m.generateReverseProxyBlock(cfg, "        ", "header_up X-Real-IP {header.CF-Connecting-IP}")
+		content = strings.ReplaceAll(content, "{{REVERSE_PROXY_BLOCK}}", rpBlock)
+	}
+
 	// Append www redirect blocks if enabled
 	if cfg.WWWRedirect {
 		content += generateWWWRedirectBlocks(cfg.Domains)
@@ -214,10 +269,22 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		return ""
 	}
 
-	// No allowlist - simple reverse_proxy
+	// Resolve trusted proxies if set
+	resolvedProxies := m.resolveTrustedProxies(cfg.TrustedProxies)
+	trustedProxiesLine := ""
+	if len(resolvedProxies) > 0 {
+		trustedProxiesLine = "\n            trusted_proxies private_ranges " + strings.Join(resolvedProxies, " ")
+	}
+
+	// No allowlist - simple or block reverse_proxy
 	if len(cfg.Allowlist) == 0 {
-		return fmt.Sprintf(`
+		if len(resolvedProxies) == 0 {
+			return fmt.Sprintf(`
     reverse_proxy %s`, cfg.Upstream)
+		}
+		return fmt.Sprintf(`
+    reverse_proxy %s {%s
+    }`, cfg.Upstream, trustedProxiesLine)
 	}
 
 	// Get resolved IPs from allowlist manager
@@ -240,6 +307,14 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths) + "\n"
 	}
 
+	// Format reverse_proxy with optional trusted_proxies
+	reverseProxyBlock := fmt.Sprintf("reverse_proxy %s", cfg.Upstream)
+	if len(resolvedProxies) > 0 {
+		reverseProxyBlock = fmt.Sprintf(`reverse_proxy %s {
+            trusted_proxies private_ranges %s
+        }`, cfg.Upstream, strings.Join(resolvedProxies, " "))
+	}
+
 	// Generate allowlist block (private_ranges always allowed for internal access)
 	// Even if DNS fails, we still restrict to private_ranges - never fall back to open access
 	if len(ips) == 0 {
@@ -250,9 +325,9 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     }
 
     handle @allowed {
-%s        reverse_proxy %s
+%s        %s
     }
-    abort`, authBlock, cfg.Upstream)
+    abort`, authBlock, reverseProxyBlock)
 	}
 
 	ipList := FormatAllowlistMatcher(ips)
@@ -262,9 +337,9 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     }
 
     handle @allowed {
-%s        reverse_proxy %s
+%s        %s
     }
-    abort`, ipList, authBlock, cfg.Upstream)
+    abort`, ipList, authBlock, reverseProxyBlock)
 }
 
 // generateWWWRedirectBlocks generates separate site blocks for www to non-www redirects
@@ -434,6 +509,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.Performance = cfg.Performance
 				info.Security = cfg.Security
 				info.WordPress = cfg.WordPress
+				info.TrustedProxies = cfg.TrustedProxies
 			} else {
 				// Parse imports from manual config file
 				content, err := os.ReadFile(path)
@@ -458,32 +534,48 @@ func parseImportsFromContent(content string, info *ConfigInfo) {
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "import ") {
-			continue
+
+		// Parse import statements
+		if strings.HasPrefix(line, "import ") {
+			importName := strings.TrimPrefix(line, "import ")
+			importName = strings.TrimSpace(importName)
+
+			switch importName {
+			case "logging":
+				info.Logging = true
+			case "tls":
+				info.TLS = true
+			case "compression":
+				info.Compression = true
+			case "header":
+				info.Header = true
+			case "noindex":
+				info.SEO = false
+			case "performance":
+				info.Performance = true
+			case "security":
+				info.Security = true
+			case "wordpress":
+				info.WordPress = true
+			case "auth":
+				info.Auth = true
+			}
 		}
 
-		importName := strings.TrimPrefix(line, "import ")
-		importName = strings.TrimSpace(importName)
-
-		switch importName {
-		case "logging":
-			info.Logging = true
-		case "tls":
-			info.TLS = true
-		case "compression":
-			info.Compression = true
-		case "header":
-			info.Header = true
-		case "noindex":
-			info.SEO = false
-		case "performance":
-			info.Performance = true
-		case "security":
-			info.Security = true
-		case "wordpress":
-			info.WordPress = true
-		case "auth":
-			info.Auth = true
+		// Parse trusted_proxies directive
+		// Format: trusted_proxies private_ranges 1.2.3.4 5.6.7.8
+		if strings.HasPrefix(line, "trusted_proxies") {
+			parts := strings.Fields(line)
+			// Skip "trusted_proxies" and optionally "private_ranges"
+			var proxies []string
+			for i := 1; i < len(parts); i++ {
+				if parts[i] != "private_ranges" {
+					proxies = append(proxies, parts[i])
+				}
+			}
+			if len(proxies) > 0 {
+				info.TrustedProxies = proxies
+			}
 		}
 	}
 
