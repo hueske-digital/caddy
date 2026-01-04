@@ -105,11 +105,17 @@ const statusHTML = `<!DOCTYPE html>
             </div>
             <div class="flex items-center gap-2 relative">
                 <span class="text-sm text-zinc-500">Options:</span>
-                <button id="options-dropdown-btn" class="px-3 py-1.5 text-sm font-medium border border-zinc-200 rounded-lg bg-white hover:bg-zinc-50 transition-colors flex items-center gap-1">
+                <button id="options-dropdown-btn" class="h-[34px] px-3 py-1.5 text-sm font-medium border border-zinc-200 rounded-lg bg-white transition-colors flex items-center gap-1">
                     <span id="options-count">All</span>
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                 </button>
                 <div id="options-dropdown" class="hidden absolute top-full left-0 mt-1 bg-white border border-zinc-200 rounded-lg shadow-lg z-50 min-w-48">
+                    <div class="border-b border-zinc-200 p-2">
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50 rounded cursor-pointer text-amber-700">
+                            <input type="checkbox" id="issues-filter" class="rounded border-amber-400 text-amber-600 focus:ring-amber-500">
+                            <span class="text-sm font-medium">⚠️ Show issues only</span>
+                        </label>
+                    </div>
                     <div class="p-2 space-y-1">
                         <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
                             <input type="checkbox" class="opt-filter rounded" data-opt="logging" data-field="logging">
@@ -182,6 +188,7 @@ const statusHTML = `<!DOCTYPE html>
         let allServices = [];
         let codeEditorUrl = '';
         let optionFilters = {}; // { fieldName: true } for active filters
+        let showIssuesOnly = false;
 
         // Icons as inline SVGs
         const icons = {
@@ -333,6 +340,22 @@ const statusHTML = `<!DOCTYPE html>
             return (svc.domains && svc.domains[0]) || '';
         }
 
+        function hasIssue(svc) {
+            // 1. External + no auth + no allowlist = unprotected
+            if (svc.type === 'external' && !svc.auth && (!svc.allowlist || svc.allowlist.length === 0)) {
+                return true;
+            }
+            // 2. SEO enabled but no WWW redirect = duplicate content risk
+            if (svc.seo && !svc.wwwRedirect) {
+                return true;
+            }
+            // 3. External + SEO disabled = might be unintentional
+            if (svc.type === 'external' && !svc.seo) {
+                return true;
+            }
+            return false;
+        }
+
         function renderServices() {
             const tbody = document.getElementById('services');
             let services = allServices;
@@ -356,6 +379,11 @@ const statusHTML = `<!DOCTYPE html>
                     (s.type || '').toLowerCase().includes(q) ||
                     (s.allowlist || []).some(a => a.toLowerCase().includes(q))
                 );
+            }
+
+            // Apply issues filter
+            if (showIssuesOnly) {
+                services = services.filter(s => hasIssue(s));
             }
 
             // Apply option filters (AND logic - service must have ALL selected options)
@@ -471,10 +499,18 @@ const statusHTML = `<!DOCTYPE html>
 
         function updateOptionsCount() {
             const count = Object.keys(optionFilters).filter(k => optionFilters[k]).length;
-            optionsCount.textContent = count === 0 ? 'All' : count + ' selected';
-            dropdownBtn.classList.toggle('bg-zinc-900', count > 0);
-            dropdownBtn.classList.toggle('text-white', count > 0);
-            dropdownBtn.classList.toggle('border-zinc-900', count > 0);
+            if (showIssuesOnly) {
+                optionsCount.textContent = '⚠️ Issues';
+                dropdownBtn.classList.add('bg-amber-500', 'text-white', 'border-amber-500');
+                dropdownBtn.classList.remove('bg-zinc-900', 'border-zinc-900');
+            } else if (count > 0) {
+                optionsCount.textContent = count + ' selected';
+                dropdownBtn.classList.add('bg-zinc-900', 'text-white', 'border-zinc-900');
+                dropdownBtn.classList.remove('bg-amber-500', 'border-amber-500');
+            } else {
+                optionsCount.textContent = 'All';
+                dropdownBtn.classList.remove('bg-zinc-900', 'text-white', 'border-zinc-900', 'bg-amber-500', 'border-amber-500');
+            }
         }
 
         document.querySelectorAll('.opt-filter').forEach(cb => {
@@ -490,8 +526,18 @@ const statusHTML = `<!DOCTYPE html>
             });
         });
 
+        // Issues filter
+        const issuesFilter = document.getElementById('issues-filter');
+        issuesFilter.addEventListener('change', () => {
+            showIssuesOnly = issuesFilter.checked;
+            updateOptionsCount();
+            renderServices();
+        });
+
         document.getElementById('clear-options').addEventListener('click', () => {
             optionFilters = {};
+            showIssuesOnly = false;
+            issuesFilter.checked = false;
             document.querySelectorAll('.opt-filter').forEach(cb => cb.checked = false);
             updateOptionsCount();
             renderServices();
