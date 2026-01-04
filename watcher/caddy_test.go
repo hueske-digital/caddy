@@ -663,6 +663,147 @@ func TestWriteConfig_AllowlistDNSFails(t *testing.T) {
 	}
 }
 
+func TestWriteConfig_AllowlistWithAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		Allowlist:   []string{"1.2.3.4"},
+		Auth:        true,
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Auth should be inside handle @allowed, not in imports
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("auth should not be in imports for external with allowlist")
+	}
+
+	// forward_auth should appear after handle @allowed
+	handleIdx := strings.Index(contentStr, "handle @allowed")
+	forwardAuthIdx := strings.Index(contentStr, "forward_auth")
+	reverseProxyIdx := strings.Index(contentStr, "reverse_proxy")
+
+	if handleIdx == -1 {
+		t.Fatal("expected handle @allowed block")
+	}
+	if forwardAuthIdx == -1 {
+		t.Fatal("expected forward_auth directive")
+	}
+	if forwardAuthIdx < handleIdx {
+		t.Error("forward_auth should be inside handle @allowed block")
+	}
+	if reverseProxyIdx < forwardAuthIdx {
+		t.Error("reverse_proxy should come after forward_auth")
+	}
+}
+
+func TestWriteConfig_AllowlistWithAuthURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		Allowlist:   []string{"1.2.3.4"},
+		Auth:        true,
+		AuthURL:     "https://login.example.com",
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Custom auth URL should be inside handle @allowed
+	if !strings.Contains(contentStr, "forward_auth https://login.example.com") {
+		t.Error("expected custom auth URL in forward_auth")
+	}
+
+	// Should be inside handle block
+	handleIdx := strings.Index(contentStr, "handle @allowed")
+	forwardAuthIdx := strings.Index(contentStr, "forward_auth https://login.example.com")
+
+	if forwardAuthIdx < handleIdx {
+		t.Error("forward_auth should be inside handle @allowed block")
+	}
+}
+
+func TestWriteConfig_ExternalWithAuthNoAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		Auth:        true,
+		TLS:         true,
+		Compression: true,
+		Header:      true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Without allowlist, auth should be in imports (before reverse_proxy)
+	if !strings.Contains(contentStr, "import auth") {
+		t.Error("expected import auth for external without allowlist")
+	}
+
+	// Should not have handle @allowed block
+	if strings.Contains(contentStr, "handle @allowed") {
+		t.Error("unexpected handle @allowed block without allowlist")
+	}
+}
+
 func TestWriteConfig_WithSEO(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)

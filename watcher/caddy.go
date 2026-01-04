@@ -138,7 +138,9 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if cfg.Header {
 		imports = append(imports, "    import header")
 	}
-	if cfg.Auth {
+	// Auth handling: for external with allowlist, auth is inside handle block (added by generateAllowlistBlock)
+	// For all other cases, auth is in imports
+	if cfg.Auth && !(cfg.Type == TypeExternal && len(cfg.Allowlist) > 0) {
 		if cfg.AuthURL != "" {
 			// Custom auth server URL
 			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths))
@@ -231,6 +233,12 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		}
 	}
 
+	// Generate auth block if needed (for external with allowlist, auth goes inside handle)
+	authBlock := ""
+	if cfg.Auth {
+		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths) + "\n"
+	}
+
 	// Generate allowlist block (private_ranges always allowed for internal access)
 	// Even if DNS fails, we still restrict to private_ranges - never fall back to open access
 	if len(ips) == 0 {
@@ -241,9 +249,9 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     }
 
     handle @allowed {
-        reverse_proxy %s
+%s        reverse_proxy %s
     }
-    abort`, cfg.Upstream)
+    abort`, authBlock, cfg.Upstream)
 	}
 
 	ipList := FormatAllowlistMatcher(ips)
@@ -253,9 +261,9 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
     }
 
     handle @allowed {
-        reverse_proxy %s
+%s        reverse_proxy %s
     }
-    abort`, ipList, cfg.Upstream)
+    abort`, ipList, authBlock, cfg.Upstream)
 }
 
 // generateWWWRedirectBlocks generates separate site blocks for www to non-www redirects
