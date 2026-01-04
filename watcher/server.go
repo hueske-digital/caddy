@@ -141,8 +141,13 @@ const statusHTML = `<!DOCTYPE html>
             log: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>',
             tls: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>',
             gzip: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7zm4 0h8m-8 4h8m-8 4h4"/></svg>',
+            header: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>',
             security: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>',
+            perf: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>',
             auth: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>',
+            seo: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>',
+            www: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+            wp: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm4 4h10M7 12h10m-7 4h4"/></svg>',
             external: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>',
             managed: '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
             manual: '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>',
@@ -164,10 +169,15 @@ const statusHTML = `<!DOCTYPE html>
 
         const optionInfo = {
             log: 'Request logging',
-            tls: 'TLS enabled',
+            tls: 'TLS (Cloudflare DNS)',
             gzip: 'Compression',
-            security: 'Security headers',
-            auth: 'Authentication'
+            header: 'Headers',
+            security: 'Security',
+            perf: 'Performance',
+            auth: 'Auth',
+            seo: 'SEO indexable',
+            www: 'www→ redirect',
+            wp: 'WordPress'
         };
 
         function loadFilterFromHash() {
@@ -226,16 +236,40 @@ const statusHTML = `<!DOCTYPE html>
         }
 
         function optionIcons(svc) {
+            // Build auth tooltip with details
+            let authTooltip = 'Auth';
+            if (svc.auth) {
+                const parts = [];
+                if (svc.authPaths && svc.authPaths.length > 0) {
+                    parts.push('Paths: ' + svc.authPaths.join(', '));
+                } else {
+                    parts.push('Full site');
+                }
+                if (svc.authUrl) {
+                    parts.push('Server: ' + svc.authUrl);
+                } else {
+                    parts.push('Local tinyauth');
+                }
+                authTooltip = 'Auth ✓ (' + parts.join(' | ') + ')';
+            } else {
+                authTooltip = 'Auth ✗';
+            }
+
             const opts = [
-                { key: 'log', enabled: svc.logging },
-                { key: 'tls', enabled: svc.tls },
-                { key: 'gzip', enabled: svc.compression },
-                { key: 'security', enabled: svc.header },
-                { key: 'auth', enabled: svc.auth }
+                { key: 'log', enabled: svc.logging, tooltip: optionInfo.log },
+                { key: 'tls', enabled: svc.tls, tooltip: optionInfo.tls },
+                { key: 'gzip', enabled: svc.compression, tooltip: optionInfo.gzip },
+                { key: 'header', enabled: svc.header, tooltip: optionInfo.header },
+                { key: 'security', enabled: svc.security, tooltip: optionInfo.security },
+                { key: 'perf', enabled: svc.performance, tooltip: optionInfo.perf },
+                { key: 'auth', enabled: svc.auth, tooltip: authTooltip },
+                { key: 'seo', enabled: svc.seo, tooltip: optionInfo.seo },
+                { key: 'www', enabled: svc.wwwRedirect, tooltip: optionInfo.www },
+                { key: 'wp', enabled: svc.wordpress, tooltip: optionInfo.wp }
             ];
             return opts.map(o => {
                 const cls = o.enabled ? 'text-emerald-500' : 'text-zinc-300';
-                const tooltip = optionInfo[o.key] + (o.enabled ? ' ✓' : ' ✗');
+                const tooltip = o.tooltip + (o.enabled ? ' ✓' : ' ✗');
                 return '<span class="' + cls + '" data-tooltip="' + tooltip + '">' + icons[o.key] + '</span>';
             }).join('');
         }
@@ -290,7 +324,7 @@ const statusHTML = `<!DOCTYPE html>
                         <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
                         <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
                         <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).map(a => '<div class="flex items-center gap-1.5 leading-relaxed group"><span>' + a + '</span><button onclick="copyToClipboard(\'' + a + '\', this)" class="text-zinc-300 hover:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">' + icons.copy + '</button></div>').join('') || '<span class="text-zinc-300">—</span>'}</td>
-                        <td class="px-4 py-3"><div class="flex items-center gap-2">${optionIcons(svc)}</div></td>
+                        <td class="px-4 py-3"><div class="flex items-center gap-1">${optionIcons(svc)}</div></td>
                         ${showConfig ? '<td class="config-cell px-4 py-3 text-center">' + configLink(svc) + '</td>' : ''}
                     </tr>
                 ` + "`" + `).join('');

@@ -19,6 +19,13 @@ type ServiceStatus struct {
 	Compression bool     `json:"compression"`
 	Header      bool     `json:"header"`
 	Auth        bool     `json:"auth"`
+	AuthPaths   []string `json:"authPaths,omitempty"`
+	AuthURL     string   `json:"authUrl,omitempty"`
+	SEO         bool     `json:"seo"`
+	WWWRedirect bool     `json:"wwwRedirect"`
+	Performance bool     `json:"performance"`
+	Security    bool     `json:"security"`
+	WordPress   bool     `json:"wordpress"`
 	Managed     bool     `json:"managed"`
 	ConfigPath  string   `json:"configPath,omitempty"`
 }
@@ -82,6 +89,13 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			Compression: cfg.Compression,
 			Header:      cfg.Header,
 			Auth:        cfg.Auth,
+			AuthPaths:   cfg.AuthPaths,
+			AuthURL:     cfg.AuthURL,
+			SEO:         cfg.SEO,
+			WWWRedirect: cfg.WWWRedirect,
+			Performance: cfg.Performance,
+			Security:    cfg.Security,
+			WordPress:   cfg.WordPress,
 			Managed:     cfg.Managed,
 			ConfigPath:  cfg.Path,
 		})

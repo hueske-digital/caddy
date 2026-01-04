@@ -755,6 +755,11 @@ func TestWriteConfig_AllowlistWithAuthURL(t *testing.T) {
 		t.Error("expected custom auth URL in forward_auth")
 	}
 
+	// External HTTPS auth needs header_up Host
+	if !strings.Contains(contentStr, "header_up Host {http.reverse_proxy.upstream.hostport}") {
+		t.Error("expected header_up Host for external HTTPS auth")
+	}
+
 	// Should be inside handle block
 	handleIdx := strings.Index(contentStr, "handle @allowed")
 	forwardAuthIdx := strings.Index(contentStr, "forward_auth https://login.example.com")
@@ -1258,6 +1263,9 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth https://login.example.com") {
 			t.Error("expected custom auth URL")
 		}
+		if !strings.Contains(result, "header_up Host {http.reverse_proxy.upstream.hostport}") {
+			t.Error("expected header_up Host for external HTTPS auth")
+		}
 		if strings.Contains(result, "tinyauth") {
 			t.Error("unexpected tinyauth reference with custom URL")
 		}
@@ -1272,6 +1280,17 @@ func TestGenerateAuthBlock(t *testing.T) {
 		}
 		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
 			t.Error("expected custom auth URL with path matcher")
+		}
+		if !strings.Contains(result, "header_up Host") {
+			t.Error("expected header_up Host for external HTTPS auth")
+		}
+	})
+
+	t.Run("local auth has no header_up", func(t *testing.T) {
+		result := generateAuthBlock("", nil)
+
+		if strings.Contains(result, "header_up") {
+			t.Error("local auth should not have header_up")
 		}
 	})
 }

@@ -67,6 +67,7 @@ type ConfigInfo struct {
 	Header      bool
 	Auth        bool
 	AuthPaths   []string
+	AuthURL     string
 	SEO         bool
 	WWWRedirect bool
 	Performance bool
@@ -287,16 +288,22 @@ https://www.%s {
 func generateAuthBlock(authURL string, paths []string) string {
 	// Determine auth server
 	authServer := "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000"
+	headerUp := ""
+
 	if authURL != "" {
 		authServer = authURL
+		// External HTTPS auth servers need correct Host header
+		if strings.HasPrefix(authURL, "https://") {
+			headerUp = "\n        header_up Host {http.reverse_proxy.upstream.hostport}"
+		}
 	}
 
 	// Full site auth (no paths)
 	if len(paths) == 0 {
 		return fmt.Sprintf(`    forward_auth %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups
-    }`, authServer)
+        copy_headers Remote-User Remote-Email Remote-Groups%s
+    }`, authServer, headerUp)
 	}
 
 	// Path-based auth
@@ -304,8 +311,8 @@ func generateAuthBlock(authURL string, paths []string) string {
 	return fmt.Sprintf(`    @auth-paths path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups
-    }`, pathList, authServer)
+        copy_headers Remote-User Remote-Email Remote-Groups%s
+    }`, pathList, authServer, headerUp)
 }
 
 // RemoveConfig removes all Caddyfile configurations for a network
@@ -426,6 +433,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.Header = cfg.Header
 				info.Auth = cfg.Auth
 				info.AuthPaths = cfg.AuthPaths
+				info.AuthURL = cfg.AuthURL
 				info.SEO = cfg.SEO
 				info.WWWRedirect = cfg.WWWRedirect
 				info.Performance = cfg.Performance
