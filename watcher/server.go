@@ -103,6 +103,52 @@ const statusHTML = `<!DOCTYPE html>
                     <button class="type-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors" data-type="cloudflare">Cloudflare</button>
                 </div>
             </div>
+            <div class="flex items-center gap-2 relative">
+                <span class="text-sm text-zinc-500">Options:</span>
+                <button id="options-dropdown-btn" class="px-3 py-1.5 text-sm font-medium border border-zinc-200 rounded-lg bg-white hover:bg-zinc-50 transition-colors flex items-center gap-1">
+                    <span id="options-count">All</span>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div id="options-dropdown" class="hidden absolute top-full left-0 mt-1 bg-white border border-zinc-200 rounded-lg shadow-lg z-50 min-w-48">
+                    <div class="p-2 space-y-1">
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="logging" data-field="logging">
+                            <span class="text-sm">Logging</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="tls" data-field="tls">
+                            <span class="text-sm">TLS</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="compression" data-field="compression">
+                            <span class="text-sm">Compression</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="auth" data-field="auth">
+                            <span class="text-sm">Auth</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="seo" data-field="seo">
+                            <span class="text-sm">SEO indexable</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="wwwRedirect" data-field="wwwRedirect">
+                            <span class="text-sm">WWW redirect</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="wordpress" data-field="wordpress">
+                            <span class="text-sm">WordPress</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                            <input type="checkbox" class="opt-filter rounded" data-opt="allowlist" data-field="allowlist">
+                            <span class="text-sm">Allowlist</span>
+                        </label>
+                    </div>
+                    <div class="border-t border-zinc-200 p-2">
+                        <button id="clear-options" class="w-full px-2 py-1.5 text-sm text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 rounded transition-colors">Clear filters</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Table -->
@@ -135,6 +181,7 @@ const statusHTML = `<!DOCTYPE html>
         let searchQuery = '';
         let allServices = [];
         let codeEditorUrl = '';
+        let optionFilters = {}; // { fieldName: true } for active filters
 
         // Icons as inline SVGs
         const icons = {
@@ -311,6 +358,19 @@ const statusHTML = `<!DOCTYPE html>
                 );
             }
 
+            // Apply option filters (AND logic - service must have ALL selected options)
+            const activeFilters = Object.keys(optionFilters).filter(k => optionFilters[k]);
+            if (activeFilters.length > 0) {
+                services = services.filter(s => {
+                    return activeFilters.every(field => {
+                        if (field === 'allowlist') {
+                            return s.allowlist && s.allowlist.length > 0;
+                        }
+                        return s[field] === true;
+                    });
+                });
+            }
+
             services = services.slice().sort((a, b) => getFirstDomain(a).localeCompare(getFirstDomain(b)));
 
             const showConfig = !!codeEditorUrl;
@@ -390,6 +450,50 @@ const statusHTML = `<!DOCTYPE html>
 
         document.getElementById('search').addEventListener('input', (e) => {
             searchQuery = e.target.value;
+            renderServices();
+        });
+
+        // Options dropdown
+        const dropdownBtn = document.getElementById('options-dropdown-btn');
+        const dropdown = document.getElementById('options-dropdown');
+        const optionsCount = document.getElementById('options-count');
+
+        dropdownBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target) && e.target !== dropdownBtn) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        function updateOptionsCount() {
+            const count = Object.keys(optionFilters).filter(k => optionFilters[k]).length;
+            optionsCount.textContent = count === 0 ? 'All' : count + ' selected';
+            dropdownBtn.classList.toggle('bg-zinc-900', count > 0);
+            dropdownBtn.classList.toggle('text-white', count > 0);
+            dropdownBtn.classList.toggle('border-zinc-900', count > 0);
+        }
+
+        document.querySelectorAll('.opt-filter').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const field = cb.dataset.field;
+                if (cb.checked) {
+                    optionFilters[field] = true;
+                } else {
+                    delete optionFilters[field];
+                }
+                updateOptionsCount();
+                renderServices();
+            });
+        });
+
+        document.getElementById('clear-options').addEventListener('click', () => {
+            optionFilters = {};
+            document.querySelectorAll('.opt-filter').forEach(cb => cb.checked = false);
+            updateOptionsCount();
             renderServices();
         });
 
