@@ -50,7 +50,7 @@ services:
       - CADDY_TYPE=external                  # external|internal|cloudflare
       - CADDY_PORT=8080                      # Container port
       # Optional - enabled by default
-      - CADDY_TLS=false                      # Use HTTP challenge instead of Cloudflare DNS
+      - CADDY_DNS_PROVIDER=http              # cloudflare|hetzner|http (default: cloudflare)
       - CADDY_COMPRESSION=false              # Disable zstd/gzip compression
       - CADDY_HEADER=false                   # Disable security headers
       - CADDY_PERFORMANCE=false              # Disable static asset caching
@@ -130,8 +130,12 @@ Available snippets (defined in `hosts/base.conf`):
 - `(internal)` - private IP ranges (10.x, 172.16-31.x, 192.168.x)
 - `(cloudflare)` - Cloudflare proxy IPs
 
+**TLS snippets** (set via `CADDY_DNS_PROVIDER`):
+- `(tls)` - Alias for tls-cloudflare (backwards compatible)
+- `(tls-cloudflare)` - Cloudflare DNS challenge
+- `(tls-hetzner)` - Hetzner DNS challenge (with propagation_delay)
+
 **Auto-enabled** (disable with `CADDY_*=false`):
-- `(tls)` - Cloudflare DNS challenge for wildcard/internal domains
 - `(compression)` - zstd/gzip compression
 - `(header)` - security headers (HSTS, no indexing, hide server info)
 - `(performance)` - static asset caching (1 year), skip logs for favicon/robots
@@ -178,8 +182,11 @@ Set `CADDY_DOMAIN` in `.env` to enable the built-in status page. Defaults to `in
 
 | Variable | Description |
 |----------|-------------|
-| `CF_API_TOKEN` | Cloudflare API token (Zone Read + DNS Edit) |
+| `CF_API_TOKEN` | Cloudflare API token (if using cloudflare DNS) |
+| `HETZNER_API_TOKEN` | Hetzner DNS API token (if using hetzner DNS) |
 | `EMAIL` | Email for SSL notifications |
+
+> **Note:** You only need the API token for the DNS provider you're using. If all services use `CADDY_DNS_PROVIDER=http`, no token is required.
 
 ### Optional (docker-compose)
 
@@ -190,6 +197,7 @@ Set `CADDY_DOMAIN` in `.env` to enable the built-in status page. Defaults to `in
 | `DNS_REFRESH_INTERVAL` | `60` | Seconds between DNS refreshes |
 | `CODE_EDITOR_URL` | - | Base URL for editor links in status page |
 | `WILDCARD_DOMAINS` | - | Domains for wildcard certificates (comma-separated) |
+| `WILDCARD_DNS_PROVIDER` | `cloudflare` | DNS provider for wildcard certs (`cloudflare` or `hetzner`) |
 
 ### Optional (`.env`)
 
@@ -254,7 +262,7 @@ Full end-to-end tests with Docker containers:
 | WordPress option | `CADDY_WORDPRESS=true` adds `import wordpress` |
 | Trusted proxies | `CADDY_TRUSTED_PROXIES` adds `trusted_proxies` to reverse_proxy |
 | Performance/Security | Enabled by default, disable with `=false` |
-| Disabled options | `CADDY_TLS/COMPRESSION/HEADER=false` removes imports |
+| Disabled options | `CADDY_COMPRESSION/HEADER=false` removes imports |
 | Multiple domains | Comma-separated domains all included in config |
 | File ownership | Files created with UID/GID 1000:1000 (Linux only) |
 | Status API | `/api/status` returns valid JSON (if enabled) |

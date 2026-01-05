@@ -238,7 +238,6 @@ const statusHTML = `<!DOCTYPE html>
 
         const optionInfo = {
             log: 'Request logging',
-            tls: 'TLS (Cloudflare DNS)',
             gzip: 'Compression',
             header: 'Headers',
             security: 'Security',
@@ -249,6 +248,12 @@ const statusHTML = `<!DOCTYPE html>
             wp: 'WordPress',
             proxy: 'Trusted proxies'
         };
+
+        function getTlsTooltip(dnsProvider) {
+            if (!dnsProvider || dnsProvider === 'http') return 'TLS (ACME)';
+            if (dnsProvider === 'hetzner') return 'TLS (Hetzner)';
+            return 'TLS (Cloudflare)';
+        }
 
         function loadFilterFromHash() {
             const hash = window.location.hash.slice(1);
@@ -334,9 +339,12 @@ const statusHTML = `<!DOCTYPE html>
                 proxyTooltip = 'Trusted proxies ✗';
             }
 
+            // TLS is enabled if dnsProvider is set and not 'http'
+            const hasTls = svc.dnsProvider && svc.dnsProvider !== 'http';
+
             const opts = [
                 { key: 'log', enabled: svc.logging, tooltip: optionInfo.log },
-                { key: 'tls', enabled: svc.tls, tooltip: optionInfo.tls },
+                { key: 'tls', enabled: hasTls, tooltip: getTlsTooltip(svc.dnsProvider) },
                 { key: 'gzip', enabled: svc.compression, tooltip: optionInfo.gzip },
                 { key: 'header', enabled: svc.header, tooltip: optionInfo.header },
                 { key: 'security', enabled: svc.security, tooltip: optionInfo.security },

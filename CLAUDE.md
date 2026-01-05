@@ -58,6 +58,7 @@ caddy/
 | `CADDY_DOMAIN` | Yes | Domain(s), comma-separated |
 | `CADDY_TYPE` | Yes | `external`, `internal`, or `cloudflare` |
 | `CADDY_PORT` | Yes | Container port |
+| `CADDY_DNS_PROVIDER` | No | `cloudflare`, `hetzner`, or `http` (default: cloudflare) |
 | `CADDY_ALLOWLIST` | No | IPs/hostnames for allowlist (external only) |
 | `CADDY_TRUSTED_PROXIES` | No | IPs/hostnames for X-Forwarded-* trust |
 
@@ -70,6 +71,8 @@ caddy/
 | `ENABLE_LOGGING` | `true` | Add `import logging` to configs |
 | `DNS_REFRESH_INTERVAL` | `60` | Seconds between allowlist DNS refresh |
 | `CODE_EDITOR_URL` | - | Optional base URL for editor links in status UI |
+| `WILDCARD_DOMAINS` | - | Domains for wildcard certificates (comma-separated) |
+| `WILDCARD_DNS_PROVIDER` | `cloudflare` | DNS provider for wildcard certs (cloudflare\|hetzner) |
 
 ## Key Implementation Details
 

@@ -71,8 +71,8 @@ func main() {
 
 	// Generate wildcard certificate configs if configured
 	if len(cfg.WildcardDomains) > 0 {
-		log.Printf("Generating wildcard configs for: %v", cfg.WildcardDomains)
-		if err := caddyMgr.WriteWildcardConfigs(cfg.WildcardDomains); err != nil {
+		log.Printf("Generating wildcard configs for: %v (DNS: %s)", cfg.WildcardDomains, cfg.WildcardDNSProvider)
+		if err := caddyMgr.WriteWildcardConfigs(cfg.WildcardDomains, cfg.WildcardDNSProvider); err != nil {
 			log.Printf("Warning: failed to write wildcard configs: %v", err)
 		}
 		statusMgr.SetWildcardDomains(cfg.WildcardDomains)

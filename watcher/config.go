@@ -35,12 +35,13 @@ func splitCommaSeparated(s string) []string {
 
 // Config holds the application configuration from environment variables
 type Config struct {
-	CaddyContainer     string
-	NetworkSuffix      string
-	HostsDir           string
-	DNSRefreshInterval int      // seconds, default 60
-	CodeEditorURL      string   // optional, base URL for code editor links
-	WildcardDomains    []string // optional, domains to generate wildcard certs for
+	CaddyContainer      string
+	NetworkSuffix       string
+	HostsDir            string
+	DNSRefreshInterval  int      // seconds, default 60
+	CodeEditorURL       string   // optional, base URL for code editor links
+	WildcardDomains     []string // optional, domains to generate wildcard certs for
+	WildcardDNSProvider string   // WILDCARD_DNS_PROVIDER (cloudflare|hetzner, default: cloudflare)
 }
 
 // CaddyConfig holds the parsed configuration for a service
@@ -52,7 +53,7 @@ type CaddyConfig struct {
 	Upstream    string   // container:port
 	Allowlist   []string // From CADDY_ALLOWLIST (comma-separated hostnames/IPs)
 	Logging     bool     // From CADDY_LOGGING (optional, default false)
-	TLS         bool     // From CADDY_TLS (optional, default true)
+	DNSProvider string   // From CADDY_DNS_PROVIDER (cloudflare|hetzner|http, default: cloudflare)
 	Compression bool     // From CADDY_COMPRESSION (optional, default true)
 	Header      bool     // From CADDY_HEADER (optional, default true)
 	Auth        bool     // From CADDY_AUTH (optional, default false)
@@ -103,13 +104,20 @@ func LoadConfig() (*Config, error) {
 	// Optional wildcard domains for automatic wildcard cert generation
 	wildcardDomains := splitCommaSeparated(os.Getenv("WILDCARD_DOMAINS"))
 
+	// DNS provider for wildcard certs (cloudflare or hetzner, default: cloudflare)
+	wildcardDNSProvider := os.Getenv("WILDCARD_DNS_PROVIDER")
+	if wildcardDNSProvider == "" {
+		wildcardDNSProvider = "cloudflare"
+	}
+
 	return &Config{
-		CaddyContainer:     caddyContainer,
-		NetworkSuffix:      networkSuffix,
-		HostsDir:           hostsDir,
-		DNSRefreshInterval: dnsRefreshInterval,
-		CodeEditorURL:      codeEditorURL,
-		WildcardDomains:    wildcardDomains,
+		CaddyContainer:      caddyContainer,
+		NetworkSuffix:       networkSuffix,
+		HostsDir:            hostsDir,
+		DNSRefreshInterval:  dnsRefreshInterval,
+		CodeEditorURL:       codeEditorURL,
+		WildcardDomains:     wildcardDomains,
+		WildcardDNSProvider: wildcardDNSProvider,
 	}, nil
 }
 
@@ -177,7 +185,10 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 
 	// Parse optional flags
 	logging := env["CADDY_LOGGING"] == "true"           // default: off
-	tls := env["CADDY_TLS"] != "false"                  // default: on
+	dnsProvider := env["CADDY_DNS_PROVIDER"]            // cloudflare|hetzner|http, default: cloudflare
+	if dnsProvider == "" {
+		dnsProvider = "cloudflare"
+	}
 	compression := env["CADDY_COMPRESSION"] != "false" // default: on
 	header := env["CADDY_HEADER"] != "false"           // default: on
 	auth := env["CADDY_AUTH"] == "true"                 // default: off
@@ -195,19 +206,19 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	trustedProxies := splitCommaSeparated(env["CADDY_TRUSTED_PROXIES"])
 
 	return &CaddyConfig{
-		Network:     network,
-		Container:   name,
-		Domains:     domains,
-		Type:        typ,
-		Upstream:    upstream,
-		Allowlist:   allowlist,
-		Logging:     logging,
-		TLS:         tls,
-		Compression: compression,
-		Header:      header,
-		Auth:        auth,
-		AuthURL:     authURL,
-		AuthPaths:   authPaths,
+		Network:        network,
+		Container:      name,
+		Domains:        domains,
+		Type:           typ,
+		Upstream:       upstream,
+		Allowlist:      allowlist,
+		Logging:        logging,
+		DNSProvider:    dnsProvider,
+		Compression:    compression,
+		Header:         header,
+		Auth:           auth,
+		AuthURL:        authURL,
+		AuthPaths:      authPaths,
 		SEO:            seo,
 		WWWRedirect:    wwwRedirect,
 		Performance:    performance,

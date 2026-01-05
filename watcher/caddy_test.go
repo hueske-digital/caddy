@@ -17,7 +17,7 @@ func TestWriteConfig_Internal(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:8080",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -48,8 +48,8 @@ func TestWriteConfig_Internal(t *testing.T) {
 	if !strings.Contains(contentStr, "reverse_proxy test-container:8080") {
 		t.Error("expected reverse_proxy directive")
 	}
-	if !strings.Contains(contentStr, "import tls") {
-		t.Error("expected import tls")
+	if !strings.Contains(contentStr, "import tls-cloudflare") {
+		t.Error("expected import tls-cloudflare")
 	}
 	if !strings.Contains(contentStr, "import compression") {
 		t.Error("expected import compression")
@@ -69,7 +69,7 @@ func TestWriteConfig_External(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "external",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -105,7 +105,7 @@ func TestWriteConfig_Cloudflare(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "cloudflare",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -140,7 +140,7 @@ func TestWriteConfig_MultipleDomains(t *testing.T) {
 		Domains:     []string{"a.example.com", "b.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -176,7 +176,7 @@ func TestWriteConfig_NoLogging(t *testing.T) {
 		Type:        "internal",
 		Upstream:    "test-container:80",
 		Logging:     false,
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -208,7 +208,7 @@ func TestWriteConfig_WithLogging(t *testing.T) {
 		Type:        "internal",
 		Upstream:    "test-container:80",
 		Logging:     true,
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -244,7 +244,7 @@ func TestWriteConfig_WithAuth(t *testing.T) {
 				Domains:     []string{"test.example.com"},
 				Type:        typ,
 				Upstream:    "test-container:80",
-				TLS:         true,
+				DNSProvider: "cloudflare",
 				Compression: true,
 				Header:      true,
 				Auth:        true,
@@ -280,7 +280,7 @@ func TestWriteConfig_DisabledOptions(t *testing.T) {
 		Type:        "internal",
 		Upstream:    "test-container:80",
 		Logging:     false,
-		TLS:         false,
+		DNSProvider: "http",
 		Compression: false,
 		Header:      false,
 	}
@@ -300,8 +300,8 @@ func TestWriteConfig_DisabledOptions(t *testing.T) {
 	if strings.Contains(contentStr, "import logging") {
 		t.Error("unexpected import logging")
 	}
-	if strings.Contains(contentStr, "import tls") {
-		t.Error("unexpected import tls")
+	if strings.Contains(contentStr, "import tls-") {
+		t.Error("unexpected import tls-*")
 	}
 	if strings.Contains(contentStr, "import compression") {
 		t.Error("unexpected import compression")
@@ -322,7 +322,7 @@ func TestRemoveConfig(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -372,7 +372,7 @@ func TestWriteConfig_TypeChange(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -412,8 +412,8 @@ func TestListConfigs(t *testing.T) {
 
 	// Create configs
 	configs := []*CaddyConfig{
-		{Network: "test1_caddy", Container: "c1", Domains: []string{"test1.example.com"}, Type: "internal", Upstream: "c1:80", TLS: true, Compression: true, Header: true},
-		{Network: "test2_caddy", Container: "c2", Domains: []string{"test2.example.com"}, Type: "external", Upstream: "c2:80", TLS: true, Compression: true, Header: true},
+		{Network: "test1_caddy", Container: "c1", Domains: []string{"test1.example.com"}, Type: "internal", Upstream: "c1:80", DNSProvider: "cloudflare", Compression: true, Header: true},
+		{Network: "test2_caddy", Container: "c2", Domains: []string{"test2.example.com"}, Type: "external", Upstream: "c2:80", DNSProvider: "cloudflare", Compression: true, Header: true},
 	}
 
 	for _, cfg := range configs {
@@ -585,7 +585,7 @@ func TestWriteConfig_Allowlist(t *testing.T) {
 		Type:        "external",
 		Upstream:    "test-container:80",
 		Allowlist:   []string{"1.2.3.4", "5.6.7.8"},
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -632,7 +632,7 @@ func TestWriteConfig_AllowlistDNSFails(t *testing.T) {
 		Type:        "external",
 		Upstream:    "test-container:80",
 		Allowlist:   []string{"this-hostname-does-not-exist-xyz123.invalid"},
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -653,9 +653,9 @@ func TestWriteConfig_AllowlistDNSFails(t *testing.T) {
 	if !strings.Contains(contentStr, "private_ranges") {
 		t.Error("expected private_ranges even when DNS fails")
 	}
-	// Must have abort (fail-closed)
-	if !strings.Contains(contentStr, "abort") {
-		t.Error("expected abort when DNS fails (fail-closed)")
+	// Must have import stealth (fail-closed)
+	if !strings.Contains(contentStr, "import stealth") {
+		t.Error("expected import stealth when DNS fails (fail-closed)")
 	}
 	// Should NOT have the unresolved hostname as an IP
 	if strings.Contains(contentStr, "this-hostname-does-not-exist") {
@@ -676,7 +676,7 @@ func TestWriteConfig_AllowlistWithAuth(t *testing.T) {
 		Upstream:    "test-container:80",
 		Allowlist:   []string{"1.2.3.4"},
 		Auth:        true,
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -732,7 +732,7 @@ func TestWriteConfig_AllowlistWithAuthURL(t *testing.T) {
 		Allowlist:   []string{"1.2.3.4"},
 		Auth:        true,
 		AuthURL:     "https://login.example.com",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -780,7 +780,7 @@ func TestWriteConfig_ExternalWithAuthNoAllowlist(t *testing.T) {
 		Type:        "external",
 		Upstream:    "test-container:80",
 		Auth:        true,
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}
@@ -820,7 +820,7 @@ func TestWriteConfig_WithSEO(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		SEO:         true,
@@ -853,7 +853,7 @@ func TestWriteConfig_WithoutSEO(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		SEO:         false,
@@ -885,7 +885,7 @@ func TestWriteConfig_WithWWWRedirect(t *testing.T) {
 		Domains:     []string{"example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		WWWRedirect: true,
@@ -925,7 +925,7 @@ func TestWriteConfig_WWWRedirect_MultipleDomains(t *testing.T) {
 		Domains:     []string{"example.com", "other.com"},
 		Type:        "external",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		WWWRedirect: true,
@@ -968,7 +968,7 @@ func TestWriteConfig_NoWWWRedirect(t *testing.T) {
 		Domains:     []string{"example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		WWWRedirect: false,
@@ -993,7 +993,7 @@ func TestWriteConfig_NoWWWRedirect(t *testing.T) {
 
 func TestGenerateWWWRedirectBlocks(t *testing.T) {
 	domains := []string{"example.com", "test.org"}
-	result := generateWWWRedirectBlocks(domains)
+	result := generateWWWRedirectBlocks(domains, "cloudflare")
 
 	if !strings.Contains(result, "https://www.example.com") {
 		t.Error("expected www.example.com in result")
@@ -1001,8 +1001,8 @@ func TestGenerateWWWRedirectBlocks(t *testing.T) {
 	if !strings.Contains(result, "https://www.test.org") {
 		t.Error("expected www.test.org in result")
 	}
-	if !strings.Contains(result, "import tls") {
-		t.Error("expected import tls in redirect blocks")
+	if !strings.Contains(result, "import tls-cloudflare") {
+		t.Error("expected import tls-cloudflare in redirect blocks")
 	}
 	if !strings.Contains(result, "redir https://example.com{uri} permanent") {
 		t.Error("expected redirect to example.com")
@@ -1022,7 +1022,7 @@ func TestWriteConfig_WithPerformance(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		Performance: true,
@@ -1054,7 +1054,7 @@ func TestWriteConfig_WithSecurity(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		Security:    true,
@@ -1086,7 +1086,7 @@ func TestWriteConfig_WithWordPress(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "external",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		WordPress:   true,
@@ -1119,7 +1119,7 @@ func TestWriteConfig_DefaultsIncludePerformanceAndSecurity(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		Performance: true, // default on
@@ -1159,7 +1159,7 @@ func TestWriteConfig_AuthWithPaths(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		Auth:        true,
@@ -1201,7 +1201,7 @@ func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:80",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 		Auth:        true,
@@ -1306,7 +1306,7 @@ func TestWriteConfig_TrustedProxies_Internal(t *testing.T) {
 		Domains:        []string{"test.example.com"},
 		Type:           "internal",
 		Upstream:       "test-container:8080",
-		TLS:            true,
+		DNSProvider:    "cloudflare",
 		Compression:    true,
 		Header:         true,
 		TrustedProxies: []string{"1.2.3.4", "5.6.7.8"},
@@ -1342,7 +1342,7 @@ func TestWriteConfig_TrustedProxies_Cloudflare(t *testing.T) {
 		Domains:        []string{"test.example.com"},
 		Type:           "cloudflare",
 		Upstream:       "test-container:8080",
-		TLS:            true,
+		DNSProvider:    "cloudflare",
 		Compression:    true,
 		Header:         true,
 		TrustedProxies: []string{"10.0.0.1"},
@@ -1382,7 +1382,7 @@ func TestWriteConfig_TrustedProxies_External(t *testing.T) {
 		Domains:        []string{"test.example.com"},
 		Type:           "external",
 		Upstream:       "test-container:8080",
-		TLS:            true,
+		DNSProvider:    "cloudflare",
 		Compression:    true,
 		Header:         true,
 		TrustedProxies: []string{"192.168.1.1"},
@@ -1418,7 +1418,7 @@ func TestWriteConfig_TrustedProxies_ExternalWithAllowlist(t *testing.T) {
 		Domains:        []string{"test.example.com"},
 		Type:           "external",
 		Upstream:       "test-container:8080",
-		TLS:            true,
+		DNSProvider:    "cloudflare",
 		Compression:    true,
 		Header:         true,
 		Allowlist:      []string{"1.1.1.1"},
@@ -1457,7 +1457,7 @@ func TestWriteConfig_NoTrustedProxies(t *testing.T) {
 		Domains:     []string{"test.example.com"},
 		Type:        "internal",
 		Upstream:    "test-container:8080",
-		TLS:         true,
+		DNSProvider: "cloudflare",
 		Compression: true,
 		Header:      true,
 	}

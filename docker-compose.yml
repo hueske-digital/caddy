@@ -12,6 +12,7 @@ services:
       - COMPOSE_PROJECT_NAME
       - LOG_LEVEL=${LOG_LEVEL:-ERROR}
       - CF_API_TOKEN
+      - HETZNER_API_TOKEN
       - EMAIL
     entrypoint: /docker/entrypoint.sh
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -44,6 +45,8 @@ services:
       - CODE_EDITOR_URL=${CODE_EDITOR_URL:-}
       # Optional: domains to generate wildcard certificates for (comma-separated)
       - WILDCARD_DOMAINS=${WILDCARD_DOMAINS:-}
+      # Optional: DNS provider for wildcard certs (cloudflare|hetzner, default: cloudflare)
+      - WILDCARD_DNS_PROVIDER=${WILDCARD_DNS_PROVIDER:-cloudflare}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./hosts:/hosts

@@ -16,7 +16,7 @@ type ServiceStatus struct {
 	Allowlist      []string `json:"allowlist,omitempty"`
 	TrustedProxies []string `json:"trustedProxies,omitempty"`
 	Logging        bool     `json:"logging"`
-	TLS            bool     `json:"tls"`
+	DNSProvider    string   `json:"dnsProvider,omitempty"`
 	Compression    bool     `json:"compression"`
 	Header         bool     `json:"header"`
 	Auth           bool     `json:"auth"`
@@ -87,7 +87,7 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			Allowlist:      cfg.Allowlist,
 			TrustedProxies: cfg.TrustedProxies,
 			Logging:        cfg.Logging,
-			TLS:            cfg.TLS,
+			DNSProvider:    cfg.DNSProvider,
 			Compression:    cfg.Compression,
 			Header:         cfg.Header,
 			Auth:           cfg.Auth,

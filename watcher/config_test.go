@@ -49,8 +49,8 @@ func TestParseCaddyEnv_OptionDefaults(t *testing.T) {
 	if cfg.Logging != false {
 		t.Error("expected logging default false")
 	}
-	if cfg.TLS != true {
-		t.Error("expected TLS default true")
+	if cfg.DNSProvider != "cloudflare" {
+		t.Error("expected DNSProvider default cloudflare")
 	}
 	if cfg.Compression != true {
 		t.Error("expected compression default true")
@@ -164,7 +164,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 		name        string
 		env         map[string]string
 		logging     bool
-		tls         bool
+		dnsProvider string
 		compression bool
 		header      bool
 		auth        bool
@@ -182,7 +182,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_PORT":   "80",
 			},
 			logging:     false,
-			tls:         true,
+			dnsProvider: "cloudflare",
 			compression: true,
 			header:      true,
 			auth:        false,
@@ -201,7 +201,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_LOGGING": "true",
 			},
 			logging:     true,
-			tls:         true,
+			dnsProvider: "cloudflare",
 			compression: true,
 			header:      true,
 			auth:        false,
@@ -220,7 +220,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_AUTH":   "true",
 			},
 			logging:     false,
-			tls:         true,
+			dnsProvider: "cloudflare",
 			compression: true,
 			header:      true,
 			auth:        true,
@@ -239,7 +239,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_SEO":    "true",
 			},
 			logging:     false,
-			tls:         true,
+			dnsProvider: "cloudflare",
 			compression: true,
 			header:      true,
 			auth:        false,
@@ -258,7 +258,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_WWW_REDIRECT": "true",
 			},
 			logging:     false,
-			tls:         true,
+			dnsProvider: "cloudflare",
 			compression: true,
 			header:      true,
 			auth:        false,
@@ -277,7 +277,7 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 				"CADDY_WORDPRESS": "true",
 			},
 			logging:     false,
-			tls:         true,
+			dnsProvider: "cloudflare",
 			compression: true,
 			header:      true,
 			auth:        false,
@@ -290,17 +290,17 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 		{
 			name: "all disabled",
 			env: map[string]string{
-				"CADDY_DOMAIN":      "test.example.com",
-				"CADDY_TYPE":        "external",
-				"CADDY_PORT":        "80",
-				"CADDY_TLS":         "false",
-				"CADDY_COMPRESSION": "false",
-				"CADDY_HEADER":      "false",
-				"CADDY_PERFORMANCE": "false",
-				"CADDY_SECURITY":    "false",
+				"CADDY_DOMAIN":       "test.example.com",
+				"CADDY_TYPE":         "external",
+				"CADDY_PORT":         "80",
+				"CADDY_DNS_PROVIDER": "http",
+				"CADDY_COMPRESSION":  "false",
+				"CADDY_HEADER":       "false",
+				"CADDY_PERFORMANCE":  "false",
+				"CADDY_SECURITY":     "false",
 			},
 			logging:     false,
-			tls:         false,
+			dnsProvider: "http",
 			compression: false,
 			header:      false,
 			auth:        false,
@@ -321,8 +321,8 @@ func TestParseCaddyEnv_Options(t *testing.T) {
 			if cfg.Logging != tt.logging {
 				t.Errorf("logging: expected %v, got %v", tt.logging, cfg.Logging)
 			}
-			if cfg.TLS != tt.tls {
-				t.Errorf("TLS: expected %v, got %v", tt.tls, cfg.TLS)
+			if cfg.DNSProvider != tt.dnsProvider {
+				t.Errorf("DNSProvider: expected %v, got %v", tt.dnsProvider, cfg.DNSProvider)
 			}
 			if cfg.Compression != tt.compression {
 				t.Errorf("compression: expected %v, got %v", tt.compression, cfg.Compression)
