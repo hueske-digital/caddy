@@ -511,3 +511,244 @@ func TestParseCaddyEnv_TrustedProxiesEmpty(t *testing.T) {
 		t.Errorf("expected no trusted proxies, got %d", len(cfg.TrustedProxies))
 	}
 }
+
+// Multi-service tests
+
+func TestParseAllCaddyEnv_SingleService(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN": "test.example.com",
+		"CADDY_TYPE":   "internal",
+		"CADDY_PORT":   "8080",
+	}
+
+	configs, err := ParseAllCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(configs))
+	}
+
+	cfg := configs[0]
+	if cfg.Domains[0] != "test.example.com" {
+		t.Errorf("expected domain test.example.com, got %v", cfg.Domains)
+	}
+	if cfg.Type != "internal" {
+		t.Errorf("expected type internal, got %s", cfg.Type)
+	}
+}
+
+func TestParseAllCaddyEnv_MultiService(t *testing.T) {
+	env := map[string]string{
+		// Service: browser
+		"CADDY_DOMAIN_browser": "browser.example.com",
+		"CADDY_TYPE_browser":   "external",
+		"CADDY_PORT_browser":   "3000",
+		// Service: streamer
+		"CADDY_DOMAIN_streamer": "streamer.example.com",
+		"CADDY_TYPE_streamer":   "internal",
+		"CADDY_PORT_streamer":   "3030",
+	}
+
+	configs, err := ParseAllCaddyEnv(env, "test_caddy", "vpn-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("expected 2 configs, got %d", len(configs))
+	}
+
+	// Find configs by service name (order is not guaranteed due to map iteration)
+	var browserCfg, streamerCfg *CaddyConfig
+	for _, cfg := range configs {
+		if cfg.Domains[0] == "browser.example.com" {
+			browserCfg = cfg
+		} else if cfg.Domains[0] == "streamer.example.com" {
+			streamerCfg = cfg
+		}
+	}
+
+	if browserCfg == nil {
+		t.Fatal("browser config not found")
+	}
+	if streamerCfg == nil {
+		t.Fatal("streamer config not found")
+	}
+
+	// Check browser config
+	if browserCfg.Type != "external" {
+		t.Errorf("browser: expected type external, got %s", browserCfg.Type)
+	}
+	if browserCfg.Upstream != "vpn-container:3000" {
+		t.Errorf("browser: expected upstream vpn-container:3000, got %s", browserCfg.Upstream)
+	}
+	if browserCfg.Container != "vpn-container-browser" {
+		t.Errorf("browser: expected container vpn-container-browser, got %s", browserCfg.Container)
+	}
+
+	// Check streamer config
+	if streamerCfg.Type != "internal" {
+		t.Errorf("streamer: expected type internal, got %s", streamerCfg.Type)
+	}
+	if streamerCfg.Upstream != "vpn-container:3030" {
+		t.Errorf("streamer: expected upstream vpn-container:3030, got %s", streamerCfg.Upstream)
+	}
+	if streamerCfg.Container != "vpn-container-streamer" {
+		t.Errorf("streamer: expected container vpn-container-streamer, got %s", streamerCfg.Container)
+	}
+}
+
+func TestParseAllCaddyEnv_MultiServiceWithOptions(t *testing.T) {
+	env := map[string]string{
+		// Service: browser with allowlist and auth
+		"CADDY_DOMAIN_browser":    "browser.example.com",
+		"CADDY_TYPE_browser":      "external",
+		"CADDY_PORT_browser":      "3000",
+		"CADDY_ALLOWLIST_browser": "1.2.3.4, home.dyndns.org",
+		"CADDY_AUTH_browser":      "true",
+		"CADDY_AUTH_URL_browser":  "https://login.example.com",
+		// Service: streamer with different options
+		"CADDY_DOMAIN_streamer":       "streamer.example.com",
+		"CADDY_TYPE_streamer":         "internal",
+		"CADDY_PORT_streamer":         "3030",
+		"CADDY_LOGGING_streamer":      "true",
+		"CADDY_DNS_PROVIDER_streamer": "hetzner",
+	}
+
+	configs, err := ParseAllCaddyEnv(env, "test_caddy", "vpn-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("expected 2 configs, got %d", len(configs))
+	}
+
+	// Find configs
+	var browserCfg, streamerCfg *CaddyConfig
+	for _, cfg := range configs {
+		if cfg.Domains[0] == "browser.example.com" {
+			browserCfg = cfg
+		} else if cfg.Domains[0] == "streamer.example.com" {
+			streamerCfg = cfg
+		}
+	}
+
+	// Check browser options
+	if len(browserCfg.Allowlist) != 2 {
+		t.Errorf("browser: expected 2 allowlist entries, got %d", len(browserCfg.Allowlist))
+	}
+	if !browserCfg.Auth {
+		t.Error("browser: expected Auth to be true")
+	}
+	if browserCfg.AuthURL != "https://login.example.com" {
+		t.Errorf("browser: expected AuthURL https://login.example.com, got %s", browserCfg.AuthURL)
+	}
+
+	// Check streamer options
+	if !streamerCfg.Logging {
+		t.Error("streamer: expected Logging to be true")
+	}
+	if streamerCfg.DNSProvider != "hetzner" {
+		t.Errorf("streamer: expected DNSProvider hetzner, got %s", streamerCfg.DNSProvider)
+	}
+}
+
+func TestParseAllCaddyEnv_MultiServiceMissingRequired(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN_browser": "browser.example.com",
+		"CADDY_TYPE_browser":   "external",
+		// Missing CADDY_PORT_browser
+	}
+
+	_, err := ParseAllCaddyEnv(env, "test_caddy", "vpn-container")
+	if err == nil {
+		t.Error("expected error for missing required field")
+	}
+}
+
+func TestParseAllCaddyEnv_MultiServiceInvalidType(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN_browser": "browser.example.com",
+		"CADDY_TYPE_browser":   "invalid-type",
+		"CADDY_PORT_browser":   "3000",
+	}
+
+	_, err := ParseAllCaddyEnv(env, "test_caddy", "vpn-container")
+	if err == nil {
+		t.Error("expected error for invalid type")
+	}
+}
+
+func TestParseAllCaddyEnv_NoCaddyVars(t *testing.T) {
+	env := map[string]string{
+		"OTHER_VAR": "value",
+	}
+
+	configs, err := ParseAllCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if configs != nil {
+		t.Error("expected nil configs when no CADDY_* vars")
+	}
+}
+
+func TestExtractServiceNames(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN_browser":  "browser.example.com",
+		"CADDY_DOMAIN_streamer": "streamer.example.com",
+		"CADDY_DOMAIN_admin":    "admin.example.com",
+		"CADDY_TYPE_browser":    "external",
+		"OTHER_VAR":             "value",
+	}
+
+	names := extractServiceNames(env)
+	if len(names) != 3 {
+		t.Errorf("expected 3 service names, got %d", len(names))
+	}
+
+	// Check all names are present (order not guaranteed)
+	expected := map[string]bool{"browser": true, "streamer": true, "admin": true}
+	for _, name := range names {
+		if !expected[name] {
+			t.Errorf("unexpected service name: %s", name)
+		}
+	}
+}
+
+func TestExtractServiceNames_Empty(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN": "test.example.com", // Single-service, not multi-service
+		"OTHER_VAR":    "value",
+	}
+
+	names := extractServiceNames(env)
+	if len(names) != 0 {
+		t.Errorf("expected 0 service names for single-service mode, got %d", len(names))
+	}
+}
+
+func TestParseAllCaddyEnv_MultiServiceTrustedProxies(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN_browser":          "browser.example.com",
+		"CADDY_TYPE_browser":            "external",
+		"CADDY_PORT_browser":            "3000",
+		"CADDY_TRUSTED_PROXIES_browser": "192.168.1.1, 10.0.0.1",
+	}
+
+	configs, err := ParseAllCaddyEnv(env, "test_caddy", "vpn-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(configs))
+	}
+
+	cfg := configs[0]
+	if len(cfg.TrustedProxies) != 2 {
+		t.Errorf("expected 2 trusted proxies, got %d", len(cfg.TrustedProxies))
+	}
+	if cfg.TrustedProxies[0] != "192.168.1.1" {
+		t.Errorf("expected first proxy '192.168.1.1', got '%s'", cfg.TrustedProxies[0])
+	}
+}

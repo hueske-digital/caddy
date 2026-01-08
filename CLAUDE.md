@@ -51,7 +51,7 @@ caddy/
 | `network:connect` | Generate config for new container |
 | `container:start` | Regenerate config |
 
-## Service ENV Variables
+## Service ENV Variables (Single-Service Mode)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -61,6 +61,26 @@ caddy/
 | `CADDY_DNS_PROVIDER` | No | `cloudflare`, `hetzner`, or `http` (default: cloudflare) |
 | `CADDY_ALLOWLIST` | No | IPs/hostnames for allowlist (external only) |
 | `CADDY_TRUSTED_PROXIES` | No | IPs/hostnames for X-Forwarded-* trust |
+
+## Multi-Service Mode
+
+For containers with `network_mode: service:*` (e.g., VPN setups) that expose multiple services on different ports, use the `_servicename` suffix:
+
+```yaml
+environment:
+  # Service: browser
+  CADDY_DOMAIN_browser: browser.example.com
+  CADDY_PORT_browser: "3000"
+  CADDY_TYPE_browser: external
+  CADDY_ALLOWLIST_browser: my-hostname.example.com
+
+  # Service: streamer
+  CADDY_DOMAIN_streamer: streamer.example.com
+  CADDY_PORT_streamer: "3030"
+  CADDY_TYPE_streamer: internal
+```
+
+All single-service variables support the `_servicename` suffix. Config files are named `{container}-{servicename}_{network}.conf`.
 
 ## Watcher ENV Variables
 

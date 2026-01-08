@@ -228,6 +228,171 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	}, nil
 }
 
+// ParseAllCaddyEnv parses CADDY_* environment variables from a container
+// Supports both single-service (CADDY_DOMAIN) and multi-service (CADDY_DOMAIN_servicename) modes
+// Returns nil, nil if no CADDY_* variables are set (container should be ignored)
+// Returns nil, error if configuration is incomplete or invalid
+func ParseAllCaddyEnv(env map[string]string, network string, containerName string) ([]*CaddyConfig, error) {
+	// Check for multi-service mode: look for CADDY_DOMAIN_* pattern
+	serviceNames := extractServiceNames(env)
+
+	if len(serviceNames) > 0 {
+		// Multi-service mode
+		return parseMultiServiceEnv(env, network, containerName, serviceNames)
+	}
+
+	// Single-service mode (backwards compatible)
+	config, err := ParseCaddyEnv(env, network, containerName)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, nil
+	}
+	return []*CaddyConfig{config}, nil
+}
+
+// extractServiceNames finds all service names from CADDY_DOMAIN_* variables
+func extractServiceNames(env map[string]string) []string {
+	seen := make(map[string]bool)
+	var names []string
+
+	for key := range env {
+		if strings.HasPrefix(key, "CADDY_DOMAIN_") {
+			serviceName := strings.TrimPrefix(key, "CADDY_DOMAIN_")
+			if serviceName != "" && !seen[serviceName] {
+				seen[serviceName] = true
+				names = append(names, serviceName)
+			}
+		}
+	}
+
+	return names
+}
+
+// parseMultiServiceEnv parses multi-service environment variables
+func parseMultiServiceEnv(env map[string]string, network string, containerName string, serviceNames []string) ([]*CaddyConfig, error) {
+	var configs []*CaddyConfig
+
+	for _, serviceName := range serviceNames {
+		config, err := parseSingleServiceEnv(env, network, containerName, serviceName)
+		if err != nil {
+			return nil, fmt.Errorf("service %s: %w", serviceName, err)
+		}
+		if config != nil {
+			configs = append(configs, config)
+		}
+	}
+
+	if len(configs) == 0 {
+		return nil, nil
+	}
+
+	return configs, nil
+}
+
+// parseSingleServiceEnv parses environment variables for a single service in multi-service mode
+func parseSingleServiceEnv(env map[string]string, network string, containerName string, serviceName string) (*CaddyConfig, error) {
+	// Helper to get service-specific env var
+	getEnv := func(key string) string {
+		return env[key+"_"+serviceName]
+	}
+
+	domain := getEnv("CADDY_DOMAIN")
+	typ := getEnv("CADDY_TYPE")
+	port := getEnv("CADDY_PORT")
+
+	// CADDY_DOMAIN is required
+	if domain == "" {
+		return nil, fmt.Errorf("missing CADDY_DOMAIN_%s", serviceName)
+	}
+
+	// TYPE and PORT are required
+	if typ == "" || port == "" {
+		var missing []string
+		if typ == "" {
+			missing = append(missing, "CADDY_TYPE_"+serviceName)
+		}
+		if port == "" {
+			missing = append(missing, "CADDY_PORT_"+serviceName)
+		}
+		return nil, fmt.Errorf("missing %s", strings.Join(missing, ", "))
+	}
+
+	// Validate type
+	validType := false
+	for _, t := range ValidTypes {
+		if typ == t {
+			validType = true
+			break
+		}
+	}
+	if !validType {
+		return nil, fmt.Errorf("invalid CADDY_TYPE_%s: %s (must be %s)", serviceName, typ, strings.Join(ValidTypes, "|"))
+	}
+
+	// Validate port
+	if _, err := strconv.Atoi(port); err != nil {
+		return nil, fmt.Errorf("invalid CADDY_PORT_%s: %s (must be numeric)", serviceName, port)
+	}
+
+	// Parse and validate domains
+	domains := splitCommaSeparated(domain)
+	for _, d := range domains {
+		if !isValidDomain(d) {
+			return nil, fmt.Errorf("invalid domain: %s", d)
+		}
+	}
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("no valid domains in CADDY_DOMAIN_%s", serviceName)
+	}
+
+	// Build upstream from container name and port
+	name := strings.TrimPrefix(containerName, "/")
+	upstream := fmt.Sprintf("%s:%s", name, port)
+
+	// Parse optional flags with service suffix
+	allowlist := splitCommaSeparated(getEnv("CADDY_ALLOWLIST"))
+	logging := getEnv("CADDY_LOGGING") == "true"
+	dnsProvider := getEnv("CADDY_DNS_PROVIDER")
+	if dnsProvider == "" {
+		dnsProvider = "cloudflare"
+	}
+	compression := getEnv("CADDY_COMPRESSION") != "false"
+	header := getEnv("CADDY_HEADER") != "false"
+	auth := getEnv("CADDY_AUTH") == "true"
+	authURL := getEnv("CADDY_AUTH_URL")
+	authPaths := splitCommaSeparated(getEnv("CADDY_AUTH_PATHS"))
+	seo := getEnv("CADDY_SEO") == "true"
+	wwwRedirect := getEnv("CADDY_WWW_REDIRECT") == "true"
+	performance := getEnv("CADDY_PERFORMANCE") != "false"
+	security := getEnv("CADDY_SECURITY") != "false"
+	wordpress := getEnv("CADDY_WORDPRESS") == "true"
+	trustedProxies := splitCommaSeparated(getEnv("CADDY_TRUSTED_PROXIES"))
+
+	return &CaddyConfig{
+		Network:        network,
+		Container:      name + "-" + serviceName, // Unique container name per service
+		Domains:        domains,
+		Type:           typ,
+		Upstream:       upstream,
+		Allowlist:      allowlist,
+		Logging:        logging,
+		DNSProvider:    dnsProvider,
+		Compression:    compression,
+		Header:         header,
+		Auth:           auth,
+		AuthURL:        authURL,
+		AuthPaths:      authPaths,
+		SEO:            seo,
+		WWWRedirect:    wwwRedirect,
+		Performance:    performance,
+		Security:       security,
+		WordPress:      wordpress,
+		TrustedProxies: trustedProxies,
+	}, nil
+}
+
 // isValidDomain performs basic domain validation
 func isValidDomain(domain string) bool {
 	if len(domain) == 0 || len(domain) > 253 {

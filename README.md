@@ -72,6 +72,42 @@ networks:
   caddy:
 ```
 
+### Multi-Service Mode
+
+For containers using `network_mode: service:*` (e.g., VPN setups with multiple services on different ports), add a `_servicename` suffix to environment variables:
+
+```yaml
+services:
+  vpn:
+    image: gluetun
+    networks:
+      - caddy
+    environment:
+      # Service: browser
+      - CADDY_DOMAIN_browser=browser.example.com
+      - CADDY_TYPE_browser=external
+      - CADDY_PORT_browser=3000
+      - CADDY_ALLOWLIST_browser=home.dyndns.org
+
+      # Service: streamer
+      - CADDY_DOMAIN_streamer=streamer.example.com
+      - CADDY_TYPE_streamer=internal
+      - CADDY_PORT_streamer=3030
+
+  browser:
+    network_mode: service:vpn
+    # ...
+
+  streamer:
+    network_mode: service:vpn
+    # ...
+
+networks:
+  caddy:
+```
+
+All standard `CADDY_*` variables support the `_servicename` suffix. Each service generates its own config file.
+
 ### Types
 
 | Type | Access |

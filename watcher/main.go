@@ -152,27 +152,30 @@ func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyM
 			continue
 		}
 
-		// Parse CADDY_* variables
-		config, err := ParseCaddyEnv(env, network, container.Names[0])
+		// Parse CADDY_* variables (supports both single and multi-service modes)
+		configs, err := ParseAllCaddyEnv(env, network, container.Names[0])
 		if err != nil {
 			log.Printf("Invalid config for %s: %v", containerName, err)
 			continue
 		}
-		if config == nil {
+		if configs == nil {
 			continue // No CADDY_* variables, skip silently
 		}
 
-		// Register allowlist if present (for DNS refresh)
-		if len(config.Allowlist) > 0 && caddyMgr.allowlistManager != nil {
-			caddyMgr.allowlistManager.Register(config)
-		}
+		// Process each config (single-service: 1 config, multi-service: multiple configs)
+		for _, config := range configs {
+			// Register allowlist if present (for DNS refresh)
+			if len(config.Allowlist) > 0 && caddyMgr.allowlistManager != nil {
+				caddyMgr.allowlistManager.Register(config)
+			}
 
-		// Write config
-		if err := caddyMgr.WriteConfig(config); err != nil {
-			log.Printf("Failed to write config for %s: %v", config.ConfigKey(), err)
-			continue
+			// Write config
+			if err := caddyMgr.WriteConfig(config); err != nil {
+				log.Printf("Failed to write config for %s: %v", config.ConfigKey(), err)
+				continue
+			}
+			log.Printf("Generated config: %s/%s.conf", config.Type, config.ConfigKey())
 		}
-		log.Printf("Generated config: %s/%s.conf", config.Type, config.ConfigKey())
 	}
 
 	return nil
