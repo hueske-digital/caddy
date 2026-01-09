@@ -190,13 +190,13 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if cfg.Auth && !(cfg.Type == TypeExternal && len(cfg.Allowlist) > 0) {
 		if cfg.AuthURL != "" {
 			// Custom auth server URL
-			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths))
-		} else if len(cfg.AuthPaths) == 0 {
+			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept))
+		} else if len(cfg.AuthPaths) == 0 && len(cfg.AuthExcept) == 0 {
 			// Protect entire site with local tinyauth
 			imports = append(imports, "    import auth")
 		} else {
-			// Protect only specific paths with local tinyauth
-			imports = append(imports, generateAuthBlock("", cfg.AuthPaths))
+			// Protect only specific paths or all except specific paths with local tinyauth
+			imports = append(imports, generateAuthBlock("", cfg.AuthPaths, cfg.AuthExcept))
 		}
 	}
 	if !cfg.SEO {
@@ -304,7 +304,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	// Generate auth block if needed (for external with allowlist, auth goes inside handle)
 	authBlock := ""
 	if cfg.Auth {
-		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths) + "\n"
+		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept) + "\n"
 	}
 
 	// Format reverse_proxy with optional trusted_proxies
@@ -362,8 +362,10 @@ https://www.%s {%s
 
 // generateAuthBlock generates forward_auth directive
 // If authURL is empty, uses local tinyauth container
-// If paths is empty, protects entire site
-func generateAuthBlock(authURL string, paths []string) string {
+// If paths is empty and except is empty, protects entire site
+// If paths is set, protects only those paths
+// If except is set, protects all EXCEPT those paths
+func generateAuthBlock(authURL string, paths []string, except []string) string {
 	// Determine auth server
 	authServer := "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000"
 	headerUp := ""
@@ -376,15 +378,25 @@ func generateAuthBlock(authURL string, paths []string) string {
 		}
 	}
 
-	// Full site auth (no paths)
-	if len(paths) == 0 {
+	// Full site auth (no paths, no except)
+	if len(paths) == 0 && len(except) == 0 {
 		return fmt.Sprintf(`    forward_auth %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
     }`, authServer, headerUp)
 	}
 
-	// Path-based auth
+	// Auth with except paths (protect all EXCEPT these)
+	if len(except) > 0 {
+		exceptList := strings.Join(except, " ")
+		return fmt.Sprintf(`    @auth-paths not path %s
+    forward_auth @auth-paths %s {
+        uri /api/auth/caddy
+        copy_headers Remote-User Remote-Email Remote-Groups%s
+    }`, exceptList, authServer, headerUp)
+	}
+
+	// Path-based auth (protect only these paths)
 	pathList := strings.Join(paths, " ")
 	return fmt.Sprintf(`    @auth-paths path %s
     forward_auth @auth-paths %s {

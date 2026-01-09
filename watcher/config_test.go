@@ -471,6 +471,62 @@ func TestParseCaddyEnv_AuthURL(t *testing.T) {
 	}
 }
 
+func TestParseCaddyEnv_AuthExcept(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN":      "test.example.com",
+		"CADDY_TYPE":        "external",
+		"CADDY_PORT":        "80",
+		"CADDY_AUTH":        "true",
+		"CADDY_AUTH_EXCEPT": "/health, /api/public/*",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Auth {
+		t.Error("expected Auth to be true")
+	}
+	if len(cfg.AuthExcept) != 2 {
+		t.Errorf("expected 2 auth except paths, got %d", len(cfg.AuthExcept))
+	}
+	expected := []string{"/health", "/api/public/*"}
+	for i, e := range expected {
+		if i >= len(cfg.AuthExcept) {
+			t.Errorf("missing auth except path %s", e)
+			continue
+		}
+		if cfg.AuthExcept[i] != e {
+			t.Errorf("expected auth except path %s at index %d, got %s", e, i, cfg.AuthExcept[i])
+		}
+	}
+}
+
+func TestParseCaddyEnv_AuthPathsAndExceptConflict(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN":      "test.example.com",
+		"CADDY_TYPE":        "external",
+		"CADDY_PORT":        "80",
+		"CADDY_AUTH":        "true",
+		"CADDY_AUTH_PATHS":  "/admin/*",
+		"CADDY_AUTH_EXCEPT": "/health",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// AUTH_PATHS should take precedence, AUTH_EXCEPT should be nil
+	if len(cfg.AuthPaths) != 1 {
+		t.Errorf("expected 1 auth path, got %d", len(cfg.AuthPaths))
+	}
+	if len(cfg.AuthExcept) != 0 {
+		t.Errorf("expected 0 auth except paths (AUTH_PATHS takes precedence), got %d", len(cfg.AuthExcept))
+	}
+}
+
 func TestParseCaddyEnv_TrustedProxies(t *testing.T) {
 	env := map[string]string{
 		"CADDY_DOMAIN":          "test.example.com",

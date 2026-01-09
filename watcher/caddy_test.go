@@ -1233,7 +1233,7 @@ func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
 func TestGenerateAuthBlock(t *testing.T) {
 	t.Run("path-based with local auth", func(t *testing.T) {
 		paths := []string{"/admin/*", "/api/private/*"}
-		result := generateAuthBlock("", paths)
+		result := generateAuthBlock("", paths, nil)
 
 		if !strings.Contains(result, "@auth-paths path /admin/* /api/private/*") {
 			t.Error("expected path matcher with all paths")
@@ -1247,7 +1247,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 	})
 
 	t.Run("full site with local auth", func(t *testing.T) {
-		result := generateAuthBlock("", nil)
+		result := generateAuthBlock("", nil, nil)
 
 		if strings.Contains(result, "@auth-paths") {
 			t.Error("unexpected path matcher for full site auth")
@@ -1258,7 +1258,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 	})
 
 	t.Run("full site with custom auth URL", func(t *testing.T) {
-		result := generateAuthBlock("https://login.example.com", nil)
+		result := generateAuthBlock("https://login.example.com", nil, nil)
 
 		if !strings.Contains(result, "forward_auth https://login.example.com") {
 			t.Error("expected custom auth URL")
@@ -1273,7 +1273,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 
 	t.Run("path-based with custom auth URL", func(t *testing.T) {
 		paths := []string{"/admin", "/admin/*"}
-		result := generateAuthBlock("https://login.example.com", paths)
+		result := generateAuthBlock("https://login.example.com", paths, nil)
 
 		if !strings.Contains(result, "@auth-paths path /admin /admin/*") {
 			t.Error("expected path matcher")
@@ -1287,10 +1287,54 @@ func TestGenerateAuthBlock(t *testing.T) {
 	})
 
 	t.Run("local auth has no header_up", func(t *testing.T) {
-		result := generateAuthBlock("", nil)
+		result := generateAuthBlock("", nil, nil)
 
 		if strings.Contains(result, "header_up") {
 			t.Error("local auth should not have header_up")
+		}
+	})
+
+	t.Run("except paths with local auth", func(t *testing.T) {
+		except := []string{"/health", "/api/public/*"}
+		result := generateAuthBlock("", nil, except)
+
+		if !strings.Contains(result, "@auth-paths not path /health /api/public/*") {
+			t.Error("expected 'not path' matcher with except paths")
+		}
+		if !strings.Contains(result, "forward_auth @auth-paths") {
+			t.Error("expected forward_auth with matcher")
+		}
+		if !strings.Contains(result, "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000") {
+			t.Error("expected local tinyauth server")
+		}
+	})
+
+	t.Run("except paths with custom auth URL", func(t *testing.T) {
+		except := []string{"/health", "/metrics"}
+		result := generateAuthBlock("https://login.example.com", nil, except)
+
+		if !strings.Contains(result, "@auth-paths not path /health /metrics") {
+			t.Error("expected 'not path' matcher")
+		}
+		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
+			t.Error("expected custom auth URL with except matcher")
+		}
+		if !strings.Contains(result, "header_up Host") {
+			t.Error("expected header_up Host for external HTTPS auth")
+		}
+	})
+
+	t.Run("paths takes precedence over except", func(t *testing.T) {
+		paths := []string{"/admin/*"}
+		// Note: The warning and precedence is handled in ParseCaddyEnv, not here
+		// When paths is set, except should be nil after ParseCaddyEnv
+		result := generateAuthBlock("", paths, nil)
+
+		if !strings.Contains(result, "@auth-paths path /admin/*") {
+			t.Error("expected path matcher when paths is set")
+		}
+		if strings.Contains(result, "not path") {
+			t.Error("unexpected 'not path' when paths is set")
 		}
 	})
 }
