@@ -317,6 +317,8 @@ const statusHTML = `<!DOCTYPE html>
                 const parts = [];
                 if (svc.authPaths && svc.authPaths.length > 0) {
                     parts.push('Paths: ' + svc.authPaths.join(', '));
+                } else if (svc.authExcept && svc.authExcept.length > 0) {
+                    parts.push('Except: ' + svc.authExcept.join(', '));
                 } else {
                     parts.push('Full site');
                 }

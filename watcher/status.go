@@ -21,6 +21,7 @@ type ServiceStatus struct {
 	Header         bool     `json:"header"`
 	Auth           bool     `json:"auth"`
 	AuthPaths      []string `json:"authPaths,omitempty"`
+	AuthExcept     []string `json:"authExcept,omitempty"`
 	AuthURL        string   `json:"authUrl,omitempty"`
 	SEO            bool     `json:"seo"`
 	WWWRedirect    bool     `json:"wwwRedirect"`
@@ -92,6 +93,7 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			Header:         cfg.Header,
 			Auth:           cfg.Auth,
 			AuthPaths:      cfg.AuthPaths,
+			AuthExcept:     cfg.AuthExcept,
 			AuthURL:        cfg.AuthURL,
 			SEO:            cfg.SEO,
 			WWWRedirect:    cfg.WWWRedirect,

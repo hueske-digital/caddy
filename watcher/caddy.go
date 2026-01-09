@@ -65,6 +65,7 @@ type ConfigInfo struct {
 	Header         bool
 	Auth           bool
 	AuthPaths      []string
+	AuthExcept     []string
 	AuthURL        string
 	SEO            bool
 	WWWRedirect    bool
@@ -518,6 +519,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.Header = cfg.Header
 				info.Auth = cfg.Auth
 				info.AuthPaths = cfg.AuthPaths
+				info.AuthExcept = cfg.AuthExcept
 				info.AuthURL = cfg.AuthURL
 				info.SEO = cfg.SEO
 				info.WWWRedirect = cfg.WWWRedirect
