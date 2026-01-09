@@ -1233,7 +1233,7 @@ func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
 func TestGenerateAuthBlock(t *testing.T) {
 	t.Run("path-based with local auth", func(t *testing.T) {
 		paths := []string{"/admin/*", "/api/private/*"}
-		result := generateAuthBlock("", paths, nil)
+		result := generateAuthBlock("", paths, nil, nil)
 
 		if !strings.Contains(result, "@auth-paths path /admin/* /api/private/*") {
 			t.Error("expected path matcher with all paths")
@@ -1247,7 +1247,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 	})
 
 	t.Run("full site with local auth", func(t *testing.T) {
-		result := generateAuthBlock("", nil, nil)
+		result := generateAuthBlock("", nil, nil, nil)
 
 		if strings.Contains(result, "@auth-paths") {
 			t.Error("unexpected path matcher for full site auth")
@@ -1258,7 +1258,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 	})
 
 	t.Run("full site with custom auth URL", func(t *testing.T) {
-		result := generateAuthBlock("https://login.example.com", nil, nil)
+		result := generateAuthBlock("https://login.example.com", nil, nil, nil)
 
 		if !strings.Contains(result, "forward_auth https://login.example.com") {
 			t.Error("expected custom auth URL")
@@ -1273,7 +1273,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 
 	t.Run("path-based with custom auth URL", func(t *testing.T) {
 		paths := []string{"/admin", "/admin/*"}
-		result := generateAuthBlock("https://login.example.com", paths, nil)
+		result := generateAuthBlock("https://login.example.com", paths, nil, nil)
 
 		if !strings.Contains(result, "@auth-paths path /admin /admin/*") {
 			t.Error("expected path matcher")
@@ -1287,7 +1287,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 	})
 
 	t.Run("local auth has no header_up", func(t *testing.T) {
-		result := generateAuthBlock("", nil, nil)
+		result := generateAuthBlock("", nil, nil, nil)
 
 		if strings.Contains(result, "header_up") {
 			t.Error("local auth should not have header_up")
@@ -1296,7 +1296,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 
 	t.Run("except paths with local auth", func(t *testing.T) {
 		except := []string{"/health", "/api/public/*"}
-		result := generateAuthBlock("", nil, except)
+		result := generateAuthBlock("", nil, except, nil)
 
 		if !strings.Contains(result, "@auth-paths not path /health /api/public/*") {
 			t.Error("expected 'not path' matcher with except paths")
@@ -1311,7 +1311,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 
 	t.Run("except paths with custom auth URL", func(t *testing.T) {
 		except := []string{"/health", "/metrics"}
-		result := generateAuthBlock("https://login.example.com", nil, except)
+		result := generateAuthBlock("https://login.example.com", nil, except, nil)
 
 		if !strings.Contains(result, "@auth-paths not path /health /metrics") {
 			t.Error("expected 'not path' matcher")
@@ -1328,7 +1328,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 		paths := []string{"/admin/*"}
 		// Note: The warning and precedence is handled in ParseCaddyEnv, not here
 		// When paths is set, except should be nil after ParseCaddyEnv
-		result := generateAuthBlock("", paths, nil)
+		result := generateAuthBlock("", paths, nil, nil)
 
 		if !strings.Contains(result, "@auth-paths path /admin/*") {
 			t.Error("expected path matcher when paths is set")
@@ -1561,5 +1561,409 @@ https://test.example.com {
 	}
 	if info.TrustedProxies[0] != "10.0.0.1" {
 		t.Errorf("unexpected trusted proxies: %v", info.TrustedProxies)
+	}
+}
+
+// AUTH_GROUPS tests - Security critical: ensure unauthorized users cannot access resources
+func TestGenerateAuthBlock_WithGroups(t *testing.T) {
+	t.Run("full site auth with single group", func(t *testing.T) {
+		groups := []string{"admin"}
+		result := generateAuthBlock("", nil, nil, groups)
+
+		// Must have forward_auth
+		if !strings.Contains(result, "forward_auth") {
+			t.Error("expected forward_auth directive")
+		}
+		// Must have group denial matcher
+		if !strings.Contains(result, "@auth-groups-denied") {
+			t.Error("SECURITY: expected @auth-groups-denied matcher for group restriction")
+		}
+		// Must have correct regex
+		if !strings.Contains(result, "(^|,)(admin)(,|$)") {
+			t.Error("SECURITY: expected correct regex for group matching")
+		}
+		// Must have error 403 for denied groups
+		if !strings.Contains(result, "error @auth-groups-denied 403") {
+			t.Error("SECURITY: expected error 403 for denied groups")
+		}
+		// Should not have path restriction in matcher (full site)
+		if strings.Contains(result, "@auth-groups-denied {\n        path") {
+			t.Error("unexpected path restriction for full site auth")
+		}
+	})
+
+	t.Run("full site auth with multiple groups", func(t *testing.T) {
+		groups := []string{"admin", "moderator", "staff"}
+		result := generateAuthBlock("", nil, nil, groups)
+
+		// Must have regex with all groups
+		if !strings.Contains(result, "(^|,)(admin|moderator|staff)(,|$)") {
+			t.Error("SECURITY: expected regex with all allowed groups")
+		}
+	})
+
+	t.Run("path-based auth with groups", func(t *testing.T) {
+		paths := []string{"/admin/*", "/dashboard/*"}
+		groups := []string{"admin"}
+		result := generateAuthBlock("", paths, nil, groups)
+
+		// Must have path-based auth matcher
+		if !strings.Contains(result, "@auth-paths path /admin/* /dashboard/*") {
+			t.Error("expected path matcher")
+		}
+		// Must have path restriction in group denial matcher
+		if !strings.Contains(result, "path /admin/* /dashboard/*") {
+			t.Error("SECURITY: group denial must be restricted to auth paths")
+		}
+		// Must have group denial
+		if !strings.Contains(result, "@auth-groups-denied") {
+			t.Error("SECURITY: expected group denial matcher")
+		}
+	})
+
+	t.Run("except-based auth with groups", func(t *testing.T) {
+		except := []string{"/health", "/api/public/*"}
+		groups := []string{"admin", "users"}
+		result := generateAuthBlock("", nil, except, groups)
+
+		// Must have 'not path' for auth
+		if !strings.Contains(result, "@auth-paths not path /health /api/public/*") {
+			t.Error("expected 'not path' matcher for except paths")
+		}
+		// Must have 'not path' in group denial matcher too
+		if !strings.Contains(result, "not path /health /api/public/*") {
+			t.Error("SECURITY: group denial must exclude public paths")
+		}
+	})
+
+	t.Run("no groups - no group restriction", func(t *testing.T) {
+		result := generateAuthBlock("", nil, nil, nil)
+
+		// Should NOT have group denial matcher
+		if strings.Contains(result, "@auth-groups-denied") {
+			t.Error("unexpected group denial when no groups specified")
+		}
+		if strings.Contains(result, "error") {
+			t.Error("unexpected error directive when no groups specified")
+		}
+	})
+
+	t.Run("empty groups slice - no group restriction", func(t *testing.T) {
+		result := generateAuthBlock("", nil, nil, []string{})
+
+		if strings.Contains(result, "@auth-groups-denied") {
+			t.Error("unexpected group denial with empty groups slice")
+		}
+	})
+}
+
+func TestWriteConfig_AuthWithGroups_Internal(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthGroups:  []string{"admin", "developers"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should NOT have import auth (that's for full site without groups)
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("unexpected import auth when AuthGroups is set")
+	}
+	// Must have forward_auth
+	if !strings.Contains(contentStr, "forward_auth") {
+		t.Error("expected forward_auth directive")
+	}
+	// Must have group restriction
+	if !strings.Contains(contentStr, "@auth-groups-denied") {
+		t.Error("SECURITY: expected @auth-groups-denied matcher")
+	}
+	if !strings.Contains(contentStr, "(^|,)(admin|developers)(,|$)") {
+		t.Error("SECURITY: expected correct group regex")
+	}
+	if !strings.Contains(contentStr, "error @auth-groups-denied 403") {
+		t.Error("SECURITY: expected error 403 for denied groups")
+	}
+	// Internal type has stealth (which imports errors)
+	if !strings.Contains(contentStr, "import stealth") {
+		t.Error("expected import stealth for internal type")
+	}
+}
+
+func TestWriteConfig_AuthWithGroups_ExternalNoAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthGroups:  []string{"admin"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// CRITICAL: External with AUTH_GROUPS needs import errors for the 403 to work
+	if !strings.Contains(contentStr, "import errors") {
+		t.Error("SECURITY: expected import errors for external type with AUTH_GROUPS")
+	}
+	// Must have group restriction
+	if !strings.Contains(contentStr, "@auth-groups-denied") {
+		t.Error("SECURITY: expected @auth-groups-denied matcher")
+	}
+	if !strings.Contains(contentStr, "error @auth-groups-denied 403") {
+		t.Error("SECURITY: expected error 403")
+	}
+}
+
+func TestWriteConfig_AuthWithGroups_ExternalWithAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	am := NewAllowlistManager(0, nil)
+	mgr := NewCaddyManager(tmpDir, am)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthGroups:  []string{"admin", "users"},
+		Allowlist:   []string{"1.2.3.4"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// External with allowlist has stealth (which imports errors)
+	if !strings.Contains(contentStr, "import stealth") {
+		t.Error("expected import stealth for external with allowlist")
+	}
+	// Auth with groups should be inside handle @allowed block
+	handleIdx := strings.Index(contentStr, "handle @allowed")
+	forwardAuthIdx := strings.Index(contentStr, "forward_auth")
+
+	if handleIdx == -1 || forwardAuthIdx < handleIdx {
+		t.Error("forward_auth should be inside handle @allowed block")
+	}
+	// Must have group restriction
+	if !strings.Contains(contentStr, "@auth-groups-denied") {
+		t.Error("SECURITY: expected @auth-groups-denied in config")
+	}
+}
+
+func TestWriteConfig_AuthWithGroupsAndPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthPaths:   []string{"/admin/*"},
+		AuthGroups:  []string{"admin"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have path-based auth
+	if !strings.Contains(contentStr, "@auth-paths path /admin/*") {
+		t.Error("expected @auth-paths matcher")
+	}
+	// Group denial should also have path restriction
+	if !strings.Contains(contentStr, "@auth-groups-denied") {
+		t.Error("SECURITY: expected @auth-groups-denied")
+	}
+	// The group denial must include the path to avoid blocking unauthenticated paths
+	if !strings.Contains(contentStr, "path /admin/*") {
+		t.Error("SECURITY: group denial must be restricted to auth paths")
+	}
+}
+
+func TestWriteConfig_AuthWithGroupsAndExcept(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthExcept:  []string{"/health", "/api/public/*"},
+		AuthGroups:  []string{"admin", "users"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have except-based auth
+	if !strings.Contains(contentStr, "@auth-paths not path /health /api/public/*") {
+		t.Error("expected @auth-paths with not path matcher")
+	}
+	// Group denial should also exclude the public paths
+	if !strings.Contains(contentStr, "@auth-groups-denied") {
+		t.Error("SECURITY: expected @auth-groups-denied")
+	}
+	// Count occurrences of "not path" - should appear twice (once for auth, once for group denial)
+	notPathCount := strings.Count(contentStr, "not path /health /api/public/*")
+	if notPathCount < 2 {
+		t.Error("SECURITY: group denial must also exclude public paths")
+	}
+}
+
+// Test that the regex correctly handles edge cases
+func TestAuthGroupsRegex(t *testing.T) {
+	testCases := []struct {
+		name     string
+		groups   []string
+		expected string
+	}{
+		{
+			name:     "single group",
+			groups:   []string{"admin"},
+			expected: "(^|,)(admin)(,|$)",
+		},
+		{
+			name:     "two groups",
+			groups:   []string{"admin", "users"},
+			expected: "(^|,)(admin|users)(,|$)",
+		},
+		{
+			name:     "multiple groups",
+			groups:   []string{"admin", "moderator", "users", "guests"},
+			expected: "(^|,)(admin|moderator|users|guests)(,|$)",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := generateAuthBlock("", nil, nil, tc.groups)
+			if !strings.Contains(result, tc.expected) {
+				t.Errorf("expected regex %s in result", tc.expected)
+			}
+		})
+	}
+}
+
+// Test that external type without allowlist and without groups does NOT import errors
+func TestWriteConfig_ExternalNoGroupsNoErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "external",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		// No AuthGroups
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Without groups, should not import errors (and should not have stealth)
+	if strings.Contains(contentStr, "import errors") {
+		t.Error("unexpected import errors when no AUTH_GROUPS")
+	}
+	if strings.Contains(contentStr, "import stealth") {
+		t.Error("unexpected import stealth for external without allowlist")
 	}
 }

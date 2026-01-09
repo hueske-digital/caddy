@@ -60,6 +60,7 @@ type CaddyConfig struct {
 	AuthURL     string   // From CADDY_AUTH_URL (optional, custom auth server URL)
 	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
 	AuthExcept  []string // From CADDY_AUTH_EXCEPT (optional, if set protect all EXCEPT these paths)
+	AuthGroups  []string // From CADDY_AUTH_GROUPS (optional, restrict access to these groups)
 	SEO            bool     // From CADDY_SEO (optional, default false = noindex)
 	WWWRedirect    bool     // From CADDY_WWW_REDIRECT (optional, default false)
 	Performance    bool     // From CADDY_PERFORMANCE (optional, default true)
@@ -203,6 +204,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	// Parse auth paths (optional)
 	authPaths := splitCommaSeparated(env["CADDY_AUTH_PATHS"])
 	authExcept := splitCommaSeparated(env["CADDY_AUTH_EXCEPT"])
+	authGroups := splitCommaSeparated(env["CADDY_AUTH_GROUPS"])
 
 	// Warn if both AUTH_PATHS and AUTH_EXCEPT are set (AUTH_PATHS takes precedence)
 	if len(authPaths) > 0 && len(authExcept) > 0 {
@@ -228,6 +230,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		AuthURL:        authURL,
 		AuthPaths:      authPaths,
 		AuthExcept:     authExcept,
+		AuthGroups:     authGroups,
 		SEO:            seo,
 		WWWRedirect:    wwwRedirect,
 		Performance:    performance,
@@ -373,6 +376,7 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 	authURL := getEnv("CADDY_AUTH_URL")
 	authPaths := splitCommaSeparated(getEnv("CADDY_AUTH_PATHS"))
 	authExcept := splitCommaSeparated(getEnv("CADDY_AUTH_EXCEPT"))
+	authGroups := splitCommaSeparated(getEnv("CADDY_AUTH_GROUPS"))
 
 	// Warn if both AUTH_PATHS and AUTH_EXCEPT are set (AUTH_PATHS takes precedence)
 	if len(authPaths) > 0 && len(authExcept) > 0 {
@@ -402,6 +406,7 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 		AuthURL:        authURL,
 		AuthPaths:      authPaths,
 		AuthExcept:     authExcept,
+		AuthGroups:     authGroups,
 		SEO:            seo,
 		WWWRedirect:    wwwRedirect,
 		Performance:    performance,

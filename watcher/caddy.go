@@ -66,6 +66,7 @@ type ConfigInfo struct {
 	Auth           bool
 	AuthPaths      []string
 	AuthExcept     []string
+	AuthGroups     []string
 	AuthURL        string
 	SEO            bool
 	WWWRedirect    bool
@@ -191,13 +192,14 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if cfg.Auth && !(cfg.Type == TypeExternal && len(cfg.Allowlist) > 0) {
 		if cfg.AuthURL != "" {
 			// Custom auth server URL
-			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept))
-		} else if len(cfg.AuthPaths) == 0 && len(cfg.AuthExcept) == 0 {
-			// Protect entire site with local tinyauth
+			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups))
+		} else if len(cfg.AuthPaths) == 0 && len(cfg.AuthExcept) == 0 && len(cfg.AuthGroups) == 0 {
+			// Protect entire site with local tinyauth (no groups restriction)
 			imports = append(imports, "    import auth")
 		} else {
 			// Protect only specific paths or all except specific paths with local tinyauth
-			imports = append(imports, generateAuthBlock("", cfg.AuthPaths, cfg.AuthExcept))
+			// Or has group restrictions
+			imports = append(imports, generateAuthBlock("", cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups))
 		}
 	}
 	if !cfg.SEO {
@@ -211,6 +213,12 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	}
 	if cfg.WordPress {
 		imports = append(imports, "    import wordpress")
+	}
+	// Import errors for AUTH_GROUPS on external type without allowlist
+	// (internal/cloudflare types already have stealth which imports errors)
+	// (external with allowlist also has stealth)
+	if cfg.Type == TypeExternal && len(cfg.Allowlist) == 0 && cfg.Auth && len(cfg.AuthGroups) > 0 {
+		imports = append(imports, "    import errors")
 	}
 	content = strings.ReplaceAll(content, "{{IMPORTS}}", strings.Join(imports, "\n"))
 
@@ -305,7 +313,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	// Generate auth block if needed (for external with allowlist, auth goes inside handle)
 	authBlock := ""
 	if cfg.Auth {
-		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept) + "\n"
+		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups) + "\n"
 	}
 
 	// Format reverse_proxy with optional trusted_proxies
@@ -361,12 +369,13 @@ https://www.%s {%s
 	return strings.Join(blocks, "\n")
 }
 
-// generateAuthBlock generates forward_auth directive
+// generateAuthBlock generates forward_auth directive with optional group restriction
 // If authURL is empty, uses local tinyauth container
 // If paths is empty and except is empty, protects entire site
 // If paths is set, protects only those paths
 // If except is set, protects all EXCEPT those paths
-func generateAuthBlock(authURL string, paths []string, except []string) string {
+// If groups is set, only allow users with matching groups (returns 403 otherwise)
+func generateAuthBlock(authURL string, paths []string, except []string, groups []string) string {
 	// Determine auth server
 	authServer := "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000"
 	headerUp := ""
@@ -379,31 +388,63 @@ func generateAuthBlock(authURL string, paths []string, except []string) string {
 		}
 	}
 
+	// Generate group restriction block if groups are specified
+	groupsBlock := ""
+	if len(groups) > 0 {
+		// Build regex: (^|,)(group1|group2|group3)(,|$)
+		groupsRegex := fmt.Sprintf("(^|,)(%s)(,|$)", strings.Join(groups, "|"))
+		groupsBlock = fmt.Sprintf(`
+    @auth-groups-denied {%s
+        not header_regexp Remote-Groups %s
+    }
+    error @auth-groups-denied 403`, "%s", groupsRegex)
+	}
+
 	// Full site auth (no paths, no except)
 	if len(paths) == 0 && len(except) == 0 {
-		return fmt.Sprintf(`    forward_auth %s {
+		result := fmt.Sprintf(`    forward_auth %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
     }`, authServer, headerUp)
+		if len(groups) > 0 {
+			// No path restriction for groups check
+			groupsBlockFull := fmt.Sprintf(groupsBlock, "")
+			result += groupsBlockFull
+		}
+		return result
 	}
 
 	// Auth with except paths (protect all EXCEPT these)
 	if len(except) > 0 {
 		exceptList := strings.Join(except, " ")
-		return fmt.Sprintf(`    @auth-paths not path %s
+		result := fmt.Sprintf(`    @auth-paths not path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
     }`, exceptList, authServer, headerUp)
+		if len(groups) > 0 {
+			// Add path restriction to groups check
+			pathCondition := fmt.Sprintf("\n        not path %s", exceptList)
+			groupsBlockWithPath := fmt.Sprintf(groupsBlock, pathCondition)
+			result += groupsBlockWithPath
+		}
+		return result
 	}
 
 	// Path-based auth (protect only these paths)
 	pathList := strings.Join(paths, " ")
-	return fmt.Sprintf(`    @auth-paths path %s
+	result := fmt.Sprintf(`    @auth-paths path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
     }`, pathList, authServer, headerUp)
+	if len(groups) > 0 {
+		// Add path restriction to groups check
+		pathCondition := fmt.Sprintf("\n        path %s", pathList)
+		groupsBlockWithPath := fmt.Sprintf(groupsBlock, pathCondition)
+		result += groupsBlockWithPath
+	}
+	return result
 }
 
 // RemoveConfig removes all Caddyfile configurations for a network
@@ -520,6 +561,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.Auth = cfg.Auth
 				info.AuthPaths = cfg.AuthPaths
 				info.AuthExcept = cfg.AuthExcept
+				info.AuthGroups = cfg.AuthGroups
 				info.AuthURL = cfg.AuthURL
 				info.SEO = cfg.SEO
 				info.WWWRedirect = cfg.WWWRedirect
