@@ -175,6 +175,15 @@ func (d *DockerClient) GetContainerNameAndStatus(containerID string) (string, bo
 	return strings.TrimPrefix(inspect.Name, "/"), true
 }
 
+// IsContainerRunning checks if a container is running by name
+func (d *DockerClient) IsContainerRunning(containerName string) bool {
+	inspect, err := d.cli.ContainerInspect(context.Background(), containerName)
+	if err != nil {
+		return false
+	}
+	return inspect.State != nil && inspect.State.Running
+}
+
 // WatchEvents starts watching Docker events and calls the handler for each relevant event
 func (d *DockerClient) WatchEvents(ctx context.Context) (<-chan events.Message, <-chan error) {
 	filterArgs := filters.NewArgs()
@@ -222,6 +231,13 @@ func startCleanupLoop(ctx context.Context, docker *DockerClient, caddyMgr *Caddy
 
 // cleanupOrphanedNetworks finds and cleans up networks with no service containers
 func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
+	// Skip cleanup if Caddy container is not running (e.g., during Watchtower updates)
+	// This prevents race conditions where networks are removed while containers are restarting
+	if !docker.IsContainerRunning(cfg.CaddyContainer) {
+		log.Printf("Cleanup: skipping - Caddy container %s is not running", cfg.CaddyContainer)
+		return
+	}
+
 	networks, err := docker.ListProxyNetworks(cfg.NetworkSuffix)
 	if err != nil {
 		log.Printf("Cleanup: failed to list networks: %v", err)
