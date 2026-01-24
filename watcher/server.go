@@ -322,6 +322,9 @@ const statusHTML = `<!DOCTYPE html>
                 } else {
                     parts.push('Full site');
                 }
+                if (svc.authGroups && svc.authGroups.length > 0) {
+                    parts.push('Groups: ' + svc.authGroups.join(', '));
+                }
                 if (svc.authUrl) {
                     parts.push('Server: ' + svc.authUrl);
                 } else {
