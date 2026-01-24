@@ -62,6 +62,7 @@ services:
       - CADDY_AUTH_URL=https://login.example.com  # Custom auth server (default: local tinyauth)
       - CADDY_AUTH_PATHS=/admin/*,/api/*     # Protect only these paths (default: entire site)
       - CADDY_AUTH_EXCEPT=/health,/api/public/*  # Protect all EXCEPT these paths
+      - CADDY_AUTH_GROUPS=admins,editors     # Restrict to users in these groups
       - CADDY_SEO=true                       # Allow search engine indexing
       - CADDY_WWW_REDIRECT=true              # Redirect www to non-www
       - CADDY_WORDPRESS=true                 # Enable WordPress security rules
