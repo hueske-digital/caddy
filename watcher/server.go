@@ -494,6 +494,11 @@ const statusHTML = `<!DOCTYPE html>
                 // Filter out wildcard configs (they're shown separately)
                 allServices = (data.services || []).filter(s => !s.configPath || !s.configPath.includes('/wildcard.'));
                 codeEditorUrl = data.codeEditorUrl || '';
+                // Set page title from statusDomain
+                if (data.statusDomain) {
+                    const firstDomain = data.statusDomain.split(',')[0].trim();
+                    document.title = firstDomain + ' - Proxy Overview';
+                }
                 renderWildcards(data.wildcardDomains);
                 renderServices();
             } catch (err) {

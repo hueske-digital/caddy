@@ -36,7 +36,8 @@ func main() {
 
 	// Create managers
 	caddyMgr := NewCaddyManager(cfg.HostsDir, allowlistMgr)
-	statusMgr := NewStatusManager(cfg.CodeEditorURL)
+	statusDomain := os.Getenv("CADDY_DOMAIN")
+	statusMgr := NewStatusManager(cfg.CodeEditorURL, statusDomain)
 
 	// Start status server only if CADDY_DOMAIN is set (watcher discovers itself)
 	if os.Getenv("CADDY_DOMAIN") != "" {

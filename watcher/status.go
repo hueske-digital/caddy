@@ -40,6 +40,7 @@ type Status struct {
 	Summary         StatusSummary   `json:"summary"`
 	Updated         string          `json:"updated"`
 	CodeEditorURL   string          `json:"codeEditorUrl,omitempty"`
+	StatusDomain    string          `json:"statusDomain,omitempty"`
 }
 
 // StatusSummary provides quick stats
@@ -56,18 +57,21 @@ type StatusSummary struct {
 type StatusManager struct {
 	current         *Status
 	codeEditorURL   string
+	statusDomain    string
 	wildcardDomains []string
 	mu              sync.RWMutex
 }
 
 // NewStatusManager creates a new StatusManager
-func NewStatusManager(codeEditorURL string) *StatusManager {
+func NewStatusManager(codeEditorURL string, statusDomain string) *StatusManager {
 	return &StatusManager{
 		codeEditorURL: codeEditorURL,
+		statusDomain:  statusDomain,
 		current: &Status{
 			Services:      []ServiceStatus{},
 			Updated:       time.Now().Format(time.RFC3339),
 			CodeEditorURL: codeEditorURL,
+			StatusDomain:  statusDomain,
 		},
 	}
 }
@@ -133,6 +137,7 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 		Summary:         summary,
 		Updated:         time.Now().Format(time.RFC3339),
 		CodeEditorURL:   m.codeEditorURL,
+		StatusDomain:    m.statusDomain,
 	}
 }
 
