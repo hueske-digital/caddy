@@ -231,6 +231,8 @@ func TestWriteConfig_WithLogging(t *testing.T) {
 
 func TestWriteConfig_WithAuth(t *testing.T) {
 	// Test auth for all three types
+	// NOTE: internal and cloudflare have auth INSIDE handle block (for stealth)
+	//       external without allowlist has auth in imports
 	types := []string{"internal", "external", "cloudflare"}
 
 	for _, typ := range types {
@@ -262,8 +264,21 @@ func TestWriteConfig_WithAuth(t *testing.T) {
 			}
 
 			contentStr := string(content)
-			if !strings.Contains(contentStr, "import auth") {
-				t.Errorf("expected import auth for type %s", typ)
+
+			if typ == "external" {
+				// External without allowlist uses import auth
+				if !strings.Contains(contentStr, "import auth") {
+					t.Errorf("expected import auth for type %s", typ)
+				}
+			} else {
+				// Internal and cloudflare have forward_auth inside handle block
+				if !strings.Contains(contentStr, "forward_auth") {
+					t.Errorf("expected forward_auth for type %s", typ)
+				}
+				// Should NOT have import auth (that would run before IP check)
+				if strings.Contains(contentStr, "import auth") {
+					t.Errorf("unexpected import auth for type %s (should be forward_auth inside handle)", typ)
+				}
 			}
 		})
 	}
@@ -1195,6 +1210,7 @@ func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
 
+	// Test with internal type (auth inside handle block)
 	cfg := &CaddyConfig{
 		Network:     "test_caddy",
 		Container:   "test-container",
@@ -1220,9 +1236,13 @@ func TestWriteConfig_AuthWithoutPaths(t *testing.T) {
 	}
 
 	contentStr := string(content)
-	// Should have import auth for full site
-	if !strings.Contains(contentStr, "import auth") {
-		t.Error("expected import auth when AuthPaths is empty")
+	// Internal type has forward_auth inside handle block (for stealth)
+	if !strings.Contains(contentStr, "forward_auth") {
+		t.Error("expected forward_auth for internal type")
+	}
+	// Should NOT have import auth (that would run before IP check)
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("unexpected import auth for internal type (should be forward_auth inside handle)")
 	}
 	// Should NOT have path-based auth
 	if strings.Contains(contentStr, "@auth-paths") {
@@ -1925,6 +1945,190 @@ func TestAuthGroupsRegex(t *testing.T) {
 				t.Errorf("expected regex %s in result", tc.expected)
 			}
 		})
+	}
+}
+
+// SECURITY CRITICAL: Test that internal type with auth has auth INSIDE handle block
+// This ensures external requests get 404 (stealth) instead of 401 (leaks existence)
+func TestWriteConfig_InternalWithAuth_AuthInsideHandle(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// SECURITY: Auth must be INSIDE handle @internal block, not in imports
+	// Otherwise external requests get 401 instead of 404 (stealth)
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("SECURITY: 'import auth' should NOT be in imports for internal type - auth must be inside handle block")
+	}
+
+	// Must have forward_auth directive
+	if !strings.Contains(contentStr, "forward_auth") {
+		t.Error("expected forward_auth directive")
+	}
+
+	// forward_auth must come AFTER "handle @internal" (i.e., inside the handle block)
+	handleIdx := strings.Index(contentStr, "handle @internal")
+	forwardAuthIdx := strings.Index(contentStr, "forward_auth")
+	stealthIdx := strings.Index(contentStr, "import stealth")
+
+	if handleIdx == -1 {
+		t.Fatal("expected handle @internal block")
+	}
+	if forwardAuthIdx == -1 {
+		t.Fatal("expected forward_auth directive")
+	}
+	if stealthIdx == -1 {
+		t.Fatal("expected import stealth for fallback 404")
+	}
+
+	// SECURITY: forward_auth must be AFTER handle @internal (inside the block)
+	if forwardAuthIdx < handleIdx {
+		t.Error("SECURITY: forward_auth must be INSIDE handle @internal block, not before it")
+	}
+
+	// SECURITY: stealth must be AFTER handle block closes (for fallback 404)
+	if stealthIdx < forwardAuthIdx {
+		t.Error("SECURITY: import stealth must come after handle block")
+	}
+}
+
+// SECURITY CRITICAL: Test that cloudflare type with auth has auth INSIDE handle block
+func TestWriteConfig_CloudflareWithAuth_AuthInsideHandle(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "cloudflare",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "cloudflare", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// SECURITY: Auth must be INSIDE handle @cloudflare block, not in imports
+	if strings.Contains(contentStr, "import auth") {
+		t.Error("SECURITY: 'import auth' should NOT be in imports for cloudflare type - auth must be inside handle block")
+	}
+
+	// Must have forward_auth directive
+	if !strings.Contains(contentStr, "forward_auth") {
+		t.Error("expected forward_auth directive")
+	}
+
+	// forward_auth must come AFTER "handle @cloudflare"
+	handleIdx := strings.Index(contentStr, "handle @cloudflare")
+	forwardAuthIdx := strings.Index(contentStr, "forward_auth")
+	stealthIdx := strings.Index(contentStr, "import stealth")
+
+	if handleIdx == -1 {
+		t.Fatal("expected handle @cloudflare block")
+	}
+	if forwardAuthIdx == -1 {
+		t.Fatal("expected forward_auth directive")
+	}
+	if stealthIdx == -1 {
+		t.Fatal("expected import stealth for fallback 404")
+	}
+
+	// SECURITY: forward_auth must be AFTER handle @cloudflare
+	if forwardAuthIdx < handleIdx {
+		t.Error("SECURITY: forward_auth must be INSIDE handle @cloudflare block, not before it")
+	}
+
+	// SECURITY: stealth must be AFTER handle block
+	if stealthIdx < forwardAuthIdx {
+		t.Error("SECURITY: import stealth must come after handle block")
+	}
+}
+
+// SECURITY: Test internal with auth + groups - auth must still be inside handle
+func TestWriteConfig_InternalWithAuthGroups_AuthInsideHandle(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"test.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+		AuthGroups:  []string{"admin"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	handleIdx := strings.Index(contentStr, "handle @internal")
+	forwardAuthIdx := strings.Index(contentStr, "forward_auth")
+	groupsDeniedIdx := strings.Index(contentStr, "@auth-groups-denied")
+
+	if handleIdx == -1 {
+		t.Fatal("expected handle @internal block")
+	}
+
+	// SECURITY: forward_auth must be inside handle block
+	if forwardAuthIdx < handleIdx {
+		t.Error("SECURITY: forward_auth must be INSIDE handle @internal block")
+	}
+
+	// SECURITY: group denial must also be inside handle block
+	if groupsDeniedIdx != -1 && groupsDeniedIdx < handleIdx {
+		t.Error("SECURITY: @auth-groups-denied must be INSIDE handle @internal block")
 	}
 }
 

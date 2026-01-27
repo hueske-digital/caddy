@@ -25,7 +25,7 @@ var templates = map[string]string{
     import internal
 
     handle @internal {
-{{REVERSE_PROXY_BLOCK}}
+{{AUTH_BLOCK}}{{REVERSE_PROXY_BLOCK}}
     }
     import stealth
 }
@@ -37,7 +37,7 @@ var templates = map[string]string{
     import cloudflare
 
     handle @cloudflare {
-{{REVERSE_PROXY_BLOCK}}
+{{AUTH_BLOCK}}{{REVERSE_PROXY_BLOCK}}
     }
     import stealth
 }
@@ -134,6 +134,30 @@ func (m *CaddyManager) generateReverseProxyBlock(cfg *CaddyConfig, indent string
 	return strings.Join(lines, "\n")
 }
 
+// generateAuthBlockForHandle generates auth block for inside handle blocks (internal/cloudflare types)
+// Uses 8-space indentation instead of 4-space for imports
+func (m *CaddyManager) generateAuthBlockForHandle(cfg *CaddyConfig) string {
+	// Generate the base auth block (4-space indentation)
+	var baseBlock string
+	if cfg.AuthURL != "" {
+		baseBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups)
+	} else if len(cfg.AuthPaths) == 0 && len(cfg.AuthExcept) == 0 && len(cfg.AuthGroups) == 0 {
+		// Simple full-site auth - generate inline with correct indentation
+		return "        forward_auth {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000 {\n            uri /api/auth/caddy\n            copy_headers Remote-User Remote-Email Remote-Groups\n        }"
+	} else {
+		baseBlock = generateAuthBlock("", cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups)
+	}
+
+	// Add 4 more spaces to each line (convert 4-space to 8-space indentation)
+	lines := strings.Split(baseBlock, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = "    " + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // WriteConfig writes a Caddyfile configuration for a service
 func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	m.mu.Lock()
@@ -187,9 +211,11 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	if cfg.Header {
 		imports = append(imports, "    import header")
 	}
-	// Auth handling: for external with allowlist, auth is inside handle block (added by generateAllowlistBlock)
-	// For all other cases, auth is in imports
-	if cfg.Auth && !(cfg.Type == TypeExternal && len(cfg.Allowlist) > 0) {
+	// Auth handling:
+	// - For internal/cloudflare types: auth is inside handle block (for stealth - external gets 404)
+	// - For external with allowlist: auth is inside handle @allowed block (added by generateAllowlistBlock)
+	// - For external without allowlist: auth is in imports
+	if cfg.Auth && cfg.Type == TypeExternal && len(cfg.Allowlist) == 0 {
 		if cfg.AuthURL != "" {
 			// Custom auth server URL
 			imports = append(imports, generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups))
@@ -225,6 +251,16 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	// Handle allowlist placeholder (external type only)
 	allowlistBlock := m.generateAllowlistBlock(cfg)
 	content = strings.ReplaceAll(content, "{{ALLOWLIST_BLOCK}}", allowlistBlock)
+
+	// Generate auth block for internal and cloudflare types (inside handle block for stealth)
+	if cfg.Type == TypeInternal || cfg.Type == TypeCloudflare {
+		authBlock := ""
+		if cfg.Auth {
+			// Generate auth block with proper indentation (8 spaces for inside handle block)
+			authBlock = m.generateAuthBlockForHandle(cfg) + "\n"
+		}
+		content = strings.ReplaceAll(content, "{{AUTH_BLOCK}}", authBlock)
+	}
 
 	// Generate reverse_proxy block for internal and cloudflare types
 	if cfg.Type == TypeInternal {
