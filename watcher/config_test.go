@@ -376,6 +376,38 @@ func TestParseCaddyEnv_Allowlist(t *testing.T) {
 	}
 }
 
+func TestParseCaddyEnv_SEONoindexTypes(t *testing.T) {
+	env := map[string]string{
+		"CADDY_DOMAIN":            "test.example.com",
+		"CADDY_TYPE":              "external",
+		"CADDY_PORT":              "80",
+		"CADDY_SEO":               "true",
+		"CADDY_SEO_NOINDEX_TYPES": "pdf, doc, docx",
+	}
+
+	cfg, err := ParseCaddyEnv(env, "test_caddy", "test-container")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.SEO {
+		t.Error("expected SEO to be true")
+	}
+	if len(cfg.SEONoindexTypes) != 3 {
+		t.Errorf("expected 3 SEONoindexTypes entries, got %d", len(cfg.SEONoindexTypes))
+	}
+	expected := []string{"pdf", "doc", "docx"}
+	for i, e := range expected {
+		if i >= len(cfg.SEONoindexTypes) {
+			t.Errorf("missing SEONoindexTypes %s", e)
+			continue
+		}
+		if cfg.SEONoindexTypes[i] != e {
+			t.Errorf("expected SEONoindexTypes %s at index %d, got %s", e, i, cfg.SEONoindexTypes[i])
+		}
+	}
+}
+
 func TestParseCaddyEnv_ContainerNamePrefix(t *testing.T) {
 	env := map[string]string{
 		"CADDY_DOMAIN": "test.example.com",

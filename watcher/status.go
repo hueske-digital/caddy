@@ -24,8 +24,9 @@ type ServiceStatus struct {
 	AuthExcept     []string `json:"authExcept,omitempty"`
 	AuthGroups     []string `json:"authGroups,omitempty"`
 	AuthURL        string   `json:"authUrl,omitempty"`
-	SEO            bool     `json:"seo"`
-	WWWRedirect    bool     `json:"wwwRedirect"`
+	SEO             bool     `json:"seo"`
+	SEONoindexTypes []string `json:"seoNoindexTypes,omitempty"`
+	WWWRedirect     bool     `json:"wwwRedirect"`
 	Performance    bool     `json:"performance"`
 	Security       bool     `json:"security"`
 	WordPress      bool     `json:"wordpress"`
@@ -101,8 +102,9 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 			AuthExcept:     cfg.AuthExcept,
 			AuthGroups:     cfg.AuthGroups,
 			AuthURL:        cfg.AuthURL,
-			SEO:            cfg.SEO,
-			WWWRedirect:    cfg.WWWRedirect,
+			SEO:             cfg.SEO,
+			SEONoindexTypes: cfg.SEONoindexTypes,
+			WWWRedirect:     cfg.WWWRedirect,
 			Performance:    cfg.Performance,
 			Security:       cfg.Security,
 			WordPress:      cfg.WordPress,

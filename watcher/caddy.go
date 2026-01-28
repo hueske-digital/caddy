@@ -68,8 +68,9 @@ type ConfigInfo struct {
 	AuthExcept     []string
 	AuthGroups     []string
 	AuthURL        string
-	SEO            bool
-	WWWRedirect    bool
+	SEO             bool
+	SEONoindexTypes []string
+	WWWRedirect     bool
 	Performance    bool
 	Security       bool
 	WordPress      bool
@@ -230,6 +231,9 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	}
 	if !cfg.SEO {
 		imports = append(imports, "    import noindex")
+	} else if len(cfg.SEONoindexTypes) > 0 {
+		// SEO enabled but certain file types should be noindexed
+		imports = append(imports, generateSEONoindexTypesBlock(cfg.SEONoindexTypes))
 	}
 	if cfg.Performance {
 		imports = append(imports, "    import performance")
@@ -483,6 +487,28 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	return result
 }
 
+// generateSEONoindexTypesBlock generates a matcher and header directive to noindex specific file types
+// Example output for types ["pdf", "doc"]:
+//
+//	@noindex_files path *.pdf *.doc
+//	header @noindex_files X-Robots-Tag "noindex"
+func generateSEONoindexTypesBlock(types []string) string {
+	if len(types) == 0 {
+		return ""
+	}
+
+	// Build path patterns: *.pdf *.doc etc.
+	var patterns []string
+	for _, t := range types {
+		// Remove leading dot if present (user might write ".pdf" or "pdf")
+		t = strings.TrimPrefix(t, ".")
+		patterns = append(patterns, "*."+t)
+	}
+
+	return fmt.Sprintf(`    @noindex_files path %s
+    header @noindex_files X-Robots-Tag "noindex"`, strings.Join(patterns, " "))
+}
+
 // RemoveConfig removes all Caddyfile configurations for a network
 // Matches files ending with _network.conf (e.g., container_network.conf)
 func (m *CaddyManager) RemoveConfig(network string) error {
@@ -600,6 +626,7 @@ func (m *CaddyManager) ListConfigs() []ConfigInfo {
 				info.AuthGroups = cfg.AuthGroups
 				info.AuthURL = cfg.AuthURL
 				info.SEO = cfg.SEO
+				info.SEONoindexTypes = cfg.SEONoindexTypes
 				info.WWWRedirect = cfg.WWWRedirect
 				info.Performance = cfg.Performance
 				info.Security = cfg.Security

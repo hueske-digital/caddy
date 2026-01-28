@@ -61,8 +61,9 @@ type CaddyConfig struct {
 	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
 	AuthExcept  []string // From CADDY_AUTH_EXCEPT (optional, if set protect all EXCEPT these paths)
 	AuthGroups  []string // From CADDY_AUTH_GROUPS (optional, restrict access to these groups)
-	SEO            bool     // From CADDY_SEO (optional, default false = noindex)
-	WWWRedirect    bool     // From CADDY_WWW_REDIRECT (optional, default false)
+	SEO              bool     // From CADDY_SEO (optional, default false = noindex)
+	SEONoindexTypes  []string // From CADDY_SEO_NOINDEX_TYPES (optional, file extensions to noindex when SEO=true)
+	WWWRedirect      bool     // From CADDY_WWW_REDIRECT (optional, default false)
 	Performance    bool     // From CADDY_PERFORMANCE (optional, default true)
 	Security       bool     // From CADDY_SECURITY (optional, default true)
 	WordPress      bool     // From CADDY_WORDPRESS (optional, default false)
@@ -196,6 +197,7 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	auth := env["CADDY_AUTH"] == "true"                 // default: off
 	authURL := env["CADDY_AUTH_URL"]                    // optional: custom auth server URL
 	seo := env["CADDY_SEO"] == "true"                   // default: off (= noindex)
+	seoNoindexTypes := splitCommaSeparated(env["CADDY_SEO_NOINDEX_TYPES"]) // optional: file types to noindex when SEO=true
 	wwwRedirect := env["CADDY_WWW_REDIRECT"] == "true" // default: off
 	performance := env["CADDY_PERFORMANCE"] != "false" // default: on
 	security := env["CADDY_SECURITY"] != "false"       // default: on
@@ -230,13 +232,14 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		AuthURL:        authURL,
 		AuthPaths:      authPaths,
 		AuthExcept:     authExcept,
-		AuthGroups:     authGroups,
-		SEO:            seo,
-		WWWRedirect:    wwwRedirect,
-		Performance:    performance,
-		Security:       security,
-		WordPress:      wordpress,
-		TrustedProxies: trustedProxies,
+		AuthGroups:      authGroups,
+		SEO:             seo,
+		SEONoindexTypes: seoNoindexTypes,
+		WWWRedirect:     wwwRedirect,
+		Performance:     performance,
+		Security:        security,
+		WordPress:       wordpress,
+		TrustedProxies:  trustedProxies,
 	}, nil
 }
 
@@ -385,6 +388,7 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 	}
 
 	seo := getEnv("CADDY_SEO") == "true"
+	seoNoindexTypes := splitCommaSeparated(getEnv("CADDY_SEO_NOINDEX_TYPES"))
 	wwwRedirect := getEnv("CADDY_WWW_REDIRECT") == "true"
 	performance := getEnv("CADDY_PERFORMANCE") != "false"
 	security := getEnv("CADDY_SECURITY") != "false"
@@ -406,13 +410,14 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 		AuthURL:        authURL,
 		AuthPaths:      authPaths,
 		AuthExcept:     authExcept,
-		AuthGroups:     authGroups,
-		SEO:            seo,
-		WWWRedirect:    wwwRedirect,
-		Performance:    performance,
-		Security:       security,
-		WordPress:      wordpress,
-		TrustedProxies: trustedProxies,
+		AuthGroups:      authGroups,
+		SEO:             seo,
+		SEONoindexTypes: seoNoindexTypes,
+		WWWRedirect:     wwwRedirect,
+		Performance:     performance,
+		Security:        security,
+		WordPress:       wordpress,
+		TrustedProxies:  trustedProxies,
 	}, nil
 }
 

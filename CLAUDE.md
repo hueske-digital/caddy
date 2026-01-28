@@ -65,6 +65,8 @@ caddy/
 | `CADDY_AUTH_PATHS` | No | Protect only these paths (comma-separated) |
 | `CADDY_AUTH_EXCEPT` | No | Protect all EXCEPT these paths (comma-separated) |
 | `CADDY_AUTH_GROUPS` | No | Restrict access to users with these groups (comma-separated) |
+| `CADDY_SEO` | No | Allow search engine indexing (true/false, default: false) |
+| `CADDY_SEO_NOINDEX_TYPES` | No | File extensions to noindex when SEO=true (e.g., `pdf,doc`) |
 
 ## Multi-Service Mode
 

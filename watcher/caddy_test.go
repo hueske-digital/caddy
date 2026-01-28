@@ -890,6 +890,90 @@ func TestWriteConfig_WithoutSEO(t *testing.T) {
 	}
 }
 
+func TestWriteConfig_WithSEONoindexTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	// SEO=true with noindex types means indexable except for those file types
+	cfg := &CaddyConfig{
+		Network:         "test_caddy",
+		Container:       "test-container",
+		Domains:         []string{"test.example.com"},
+		Type:            "internal",
+		Upstream:        "test-container:80",
+		DNSProvider:     "cloudflare",
+		Compression:     true,
+		Header:          true,
+		SEO:             true,
+		SEONoindexTypes: []string{"pdf", "doc", "docx"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should NOT have import noindex (SEO is true)
+	if strings.Contains(contentStr, "import noindex") {
+		t.Error("expected NO import noindex when SEO is true with SEONoindexTypes")
+	}
+
+	// Should have matcher for file types
+	if !strings.Contains(contentStr, "@noindex_files path *.pdf *.doc *.docx") {
+		t.Error("expected @noindex_files matcher for file types")
+	}
+
+	// Should have header directive for noindex
+	if !strings.Contains(contentStr, `header @noindex_files X-Robots-Tag "noindex"`) {
+		t.Error("expected header directive for noindex files")
+	}
+}
+
+func TestWriteConfig_WithSEONoindexTypesWithDots(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	// Test that leading dots are removed from file types
+	cfg := &CaddyConfig{
+		Network:         "test_caddy",
+		Container:       "test-container",
+		Domains:         []string{"test.example.com"},
+		Type:            "external",
+		Upstream:        "test-container:80",
+		DNSProvider:     "cloudflare",
+		Compression:     true,
+		Header:          true,
+		SEO:             true,
+		SEONoindexTypes: []string{".pdf", ".xlsx"},
+	}
+
+	err := mgr.WriteConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "external", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have *.pdf not *..pdf
+	if !strings.Contains(contentStr, "*.pdf *.xlsx") {
+		t.Errorf("expected *.pdf *.xlsx (dots stripped), got:\n%s", contentStr)
+	}
+}
+
 func TestWriteConfig_WithWWWRedirect(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := NewCaddyManager(tmpDir, nil)
