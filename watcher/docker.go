@@ -82,20 +82,6 @@ func (d *DockerClient) DisconnectFromNetwork(networkName, containerName string) 
 	return nil
 }
 
-// RemoveNetwork removes a network
-func (d *DockerClient) RemoveNetwork(networkName string) error {
-	err := d.cli.NetworkRemove(context.Background(), networkName)
-	if err != nil {
-		// Ignore if already gone or still in use
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "has active endpoints") {
-			return nil
-		}
-		return err
-	}
-	log.Printf("Removed network %s", networkName)
-	return nil
-}
-
 // ConnectToNetworkWithRetry connects a container to a network with retry logic
 func (d *DockerClient) ConnectToNetworkWithRetry(ctx context.Context, networkName, containerName string) error {
 	maxRetries := 3
@@ -272,10 +258,11 @@ func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statu
 				log.Printf("Cleanup: failed to disconnect from %s: %v", networkName, err)
 			}
 
-			// Remove the network
-			if err := docker.RemoveNetwork(networkName); err != nil {
-				log.Printf("Cleanup: failed to remove network %s: %v", networkName, err)
-			}
+			// Note: we intentionally do NOT remove the network here.
+			// During container updates (e.g. Watchtower), service containers are
+			// temporarily stopped. Removing the network would cause containers to
+			// fail on restart with "network not found". Let Docker/Compose manage
+			// network lifecycle via docker compose down.
 
 			// Remove config for this network
 			if err := caddyMgr.RemoveConfig(networkName); err != nil {
