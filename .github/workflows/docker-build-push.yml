@@ -57,7 +57,7 @@ jobs:
           platform: ${{ matrix.platform }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           push: true
           context: ./build
