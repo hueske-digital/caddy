@@ -251,7 +251,20 @@ func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statu
 		}
 
 		if !hasServiceContainers {
-			log.Printf("Cleanup: network %s has no service containers, cleaning up", networkName)
+			// Remove config for this network. Only proceed with the rest of the
+			// cleanup (and logging) if something was actually removed, so that
+			// already-cleaned orphaned networks don't get re-processed every cycle.
+			removed, err := caddyMgr.RemoveConfig(networkName)
+			if err != nil {
+				log.Printf("Cleanup: failed to remove config for %s: %v", networkName, err)
+				continue
+			}
+			if !removed {
+				// Already cleaned up in a previous cycle - nothing to do.
+				continue
+			}
+
+			log.Printf("Cleanup: network %s has no service containers, removed config", networkName)
 
 			// Disconnect Caddy from network
 			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
@@ -263,13 +276,6 @@ func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statu
 			// temporarily stopped. Removing the network would cause containers to
 			// fail on restart with "network not found". Let Docker/Compose manage
 			// network lifecycle via docker compose down.
-
-			// Remove config for this network
-			if err := caddyMgr.RemoveConfig(networkName); err != nil {
-				log.Printf("Cleanup: failed to remove config for %s: %v", networkName, err)
-			} else {
-				log.Printf("Cleanup: removed config for %s", networkName)
-			}
 
 			// Update status
 			statusMgr.Update(caddyMgr.ListConfigs())
@@ -307,7 +313,7 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		log.Printf("Network removed: %s", networkName)
 
 		// Remove config for this network
-		if err := caddyMgr.RemoveConfig(networkName); err != nil {
+		if _, err := caddyMgr.RemoveConfig(networkName); err != nil {
 			log.Printf("Failed to remove config for %s: %v", networkName, err)
 		} else {
 			log.Printf("Removed config for %s", networkName)
@@ -332,6 +338,17 @@ func handleNetworkEvent(ctx context.Context, event events.Message, docker *Docke
 		}
 
 		log.Printf("Container %s connected to network: %s", containerName, networkName)
+
+		// Ensure Caddy itself is attached to this network. The cleanup loop
+		// disconnects Caddy from networks that temporarily have no running
+		// service containers; without this, a restarting service would get a
+		// regenerated config while Caddy is still detached, causing 502s.
+		// A single attempt is enough here: the network exists (a container just
+		// joined it) and ConnectToNetwork is a no-op if Caddy is already attached.
+		// If Caddy is down, its own start handler reconnects all networks anyway.
+		if err := docker.ConnectToNetwork(networkName, cfg.CaddyContainer); err != nil {
+			log.Printf("Failed to reconnect Caddy to %s: %v", networkName, err)
+		}
 
 		// Generate config for this container
 		if err := generateConfigsForNetwork(ctx, docker, caddyMgr, networkName, cfg); err != nil {

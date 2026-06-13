@@ -354,9 +354,12 @@ func TestRemoveConfig(t *testing.T) {
 	}
 
 	// Remove it (by network name - removes all configs for that network)
-	err = mgr.RemoveConfig("test_caddy")
+	removed, err := mgr.RemoveConfig("test_caddy")
 	if err != nil {
 		t.Fatalf("failed to remove config: %v", err)
+	}
+	if !removed {
+		t.Error("RemoveConfig should report removal of an existing config")
 	}
 
 	// Verify it's gone
@@ -370,9 +373,12 @@ func TestRemoveConfig_NonExistent(t *testing.T) {
 	mgr := NewCaddyManager(tmpDir, nil)
 
 	// Should not error when removing non-existent config
-	err := mgr.RemoveConfig("non_existent")
+	removed, err := mgr.RemoveConfig("non_existent")
 	if err != nil {
 		t.Errorf("unexpected error removing non-existent config: %v", err)
+	}
+	if removed {
+		t.Error("RemoveConfig should report nothing removed for a non-existent config")
 	}
 }
 

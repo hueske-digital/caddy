@@ -511,9 +511,13 @@ func generateSEONoindexTypesBlock(types []string) string {
 
 // RemoveConfig removes all Caddyfile configurations for a network
 // Matches files ending with _network.conf (e.g., container_network.conf)
-func (m *CaddyManager) RemoveConfig(network string) error {
+// Returns true if anything was actually removed (a stored config or a file on
+// disk), allowing callers to stay idempotent and avoid repeated work/logging.
+func (m *CaddyManager) RemoveConfig(network string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	removed := false
 
 	// Remove from stored configs (all keys ending with _network)
 	suffix := "_" + network
@@ -524,6 +528,7 @@ func (m *CaddyManager) RemoveConfig(network string) error {
 				m.allowlistManager.Unregister(key)
 			}
 			delete(m.configs, key)
+			removed = true
 		}
 	}
 
@@ -545,13 +550,14 @@ func (m *CaddyManager) RemoveConfig(network string) error {
 			if strings.HasSuffix(entry.Name(), fileSuffix) {
 				path := filepath.Join(dir, entry.Name())
 				if err := os.Remove(path); err != nil {
-					return fmt.Errorf("failed to remove %s: %v", path, err)
+					return removed, fmt.Errorf("failed to remove %s: %v", path, err)
 				}
+				removed = true
 			}
 		}
 	}
 
-	return nil
+	return removed, nil
 }
 
 // ListConfigs returns all configuration files
