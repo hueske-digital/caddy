@@ -82,6 +82,13 @@ func (d *DockerClient) DisconnectFromNetwork(networkName, containerName string) 
 	return nil
 }
 
+// RemoveNetwork removes a Docker network. It returns an error if the network
+// still has attached endpoints (Docker refuses to remove non-empty networks),
+// which makes this safe to call optimistically on orphaned networks.
+func (d *DockerClient) RemoveNetwork(networkName string) error {
+	return d.cli.NetworkRemove(context.Background(), networkName)
+}
+
 // ConnectToNetworkWithRetry connects a container to a network with retry logic
 func (d *DockerClient) ConnectToNetworkWithRetry(ctx context.Context, networkName, containerName string) error {
 	maxRetries := 3
@@ -199,24 +206,37 @@ func watchEvents(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManag
 	}
 }
 
+// cleanupGraceCycles is the number of consecutive cleanup cycles a network must
+// be orphaned (no running service containers) before the watcher removes the
+// network itself. At one cycle per 5 minutes this means a network must stay
+// empty for ~15 minutes, far longer than any container restart or Watchtower
+// update gap, which keeps removal safe from transient emptiness.
+const cleanupGraceCycles = 3
+
 // startCleanupLoop runs periodic cleanup of orphaned networks
 func startCleanupLoop(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
 	log.Println("Cleanup loop scheduled (every 5 minutes)")
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
+	// orphanCycles tracks how many consecutive cleanup cycles each network has
+	// been orphaned. This state is intentionally in-memory only: losing it on a
+	// watcher restart merely restarts the grace count, which delays removal but
+	// can never cause a premature one.
+	orphanCycles := make(map[string]int)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cleanupOrphanedNetworks(docker, caddyMgr, statusMgr, cfg)
+			cleanupOrphanedNetworks(docker, caddyMgr, statusMgr, cfg, orphanCycles)
 		}
 	}
 }
 
 // cleanupOrphanedNetworks finds and cleans up networks with no service containers
-func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config) {
+func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statusMgr *StatusManager, cfg *Config, orphanCycles map[string]int) {
 	// Skip cleanup if Caddy container is not running (e.g., during Watchtower updates)
 	// This prevents race conditions where networks are removed while containers are restarting
 	if !docker.IsContainerRunning(cfg.CaddyContainer) {
@@ -230,7 +250,10 @@ func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statu
 		return
 	}
 
+	seen := make(map[string]bool, len(networks))
 	for _, networkName := range networks {
+		seen[networkName] = true
+
 		containers, err := docker.GetNetworkContainers(networkName)
 		if err != nil {
 			continue
@@ -250,35 +273,57 @@ func cleanupOrphanedNetworks(docker *DockerClient, caddyMgr *CaddyManager, statu
 			}
 		}
 
-		if !hasServiceContainers {
-			// Remove config for this network. Only proceed with the rest of the
-			// cleanup (and logging) if something was actually removed, so that
-			// already-cleaned orphaned networks don't get re-processed every cycle.
-			removed, err := caddyMgr.RemoveConfig(networkName)
-			if err != nil {
-				log.Printf("Cleanup: failed to remove config for %s: %v", networkName, err)
-				continue
-			}
-			if !removed {
-				// Already cleaned up in a previous cycle - nothing to do.
-				continue
-			}
+		if hasServiceContainers {
+			// Network is in use again - reset its orphan counter.
+			delete(orphanCycles, networkName)
+			continue
+		}
 
+		// Network is orphaned. Remove its config (idempotent) and disconnect
+		// Caddy, but only log/update status when something actually changed so
+		// already-cleaned networks don't get re-processed noisily every cycle.
+		removed, err := caddyMgr.RemoveConfig(networkName)
+		if err != nil {
+			log.Printf("Cleanup: failed to remove config for %s: %v", networkName, err)
+		} else if removed {
 			log.Printf("Cleanup: network %s has no service containers, removed config", networkName)
-
-			// Disconnect Caddy from network
 			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
 				log.Printf("Cleanup: failed to disconnect from %s: %v", networkName, err)
 			}
-
-			// Note: we intentionally do NOT remove the network here.
-			// During container updates (e.g. Watchtower), service containers are
-			// temporarily stopped. Removing the network would cause containers to
-			// fail on restart with "network not found". Let Docker/Compose manage
-			// network lifecycle via docker compose down.
-
-			// Update status
 			statusMgr.Update(caddyMgr.ListConfigs())
+		}
+
+		// Track how long the network has been orphaned. Once it has been empty
+		// for cleanupGraceCycles in a row, remove the network itself so dead
+		// Compose projects don't leave dangling networks behind. We do NOT do
+		// this immediately: a brief gap during a container restart or Watchtower
+		// update would otherwise risk removing a network that is about to be
+		// reused (causing "network not found" on restart).
+		orphanCycles[networkName]++
+		if orphanCycles[networkName] >= cleanupGraceCycles {
+			// Make sure Caddy is detached, otherwise the network still has an
+			// active endpoint and removal would fail.
+			if err := docker.DisconnectFromNetwork(networkName, cfg.CaddyContainer); err != nil {
+				log.Printf("Cleanup: failed to disconnect from %s: %v", networkName, err)
+			}
+			if err := docker.RemoveNetwork(networkName); err != nil {
+				// Network still has endpoints (e.g. a stopped container) or is
+				// otherwise in use - leave it alone and retry next cycle. Only
+				// log on the first attempt to avoid repeating noise.
+				if orphanCycles[networkName] == cleanupGraceCycles {
+					log.Printf("Cleanup: network %s orphaned for %d cycles but not removable yet: %v", networkName, orphanCycles[networkName], err)
+				}
+			} else {
+				log.Printf("Cleanup: removed orphaned network %s (empty for %d cycles)", networkName, orphanCycles[networkName])
+				delete(orphanCycles, networkName)
+			}
+		}
+	}
+
+	// Drop counters for networks that no longer exist (e.g. removed by Compose).
+	for name := range orphanCycles {
+		if !seen[name] {
+			delete(orphanCycles, name)
 		}
 	}
 }
