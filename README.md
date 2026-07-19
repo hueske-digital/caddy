@@ -192,7 +192,6 @@ Optional forward auth via tinyauth + OIDC provider (e.g., PocketID, Authelia):
 
 ```bash
 # Configure in .env
-TINYAUTH_SECRET=random-secret
 TINYAUTH_APP_URL=https://auth.example.com
 TINYAUTH_DOMAIN=auth.example.com
 OIDC_PROVIDER_URL=https://pocketid.example.com
@@ -202,6 +201,8 @@ OIDC_CLIENT_SECRET=your-secret
 # Start with auth
 make up-auth
 ```
+
+TinyAuth trusts Docker's `172.16.0.0/12` bridge range by default for forwarded client IP headers.
 
 Then enable per service:
 ```yaml

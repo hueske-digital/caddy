@@ -1,6 +1,6 @@
 services:
   tinyauth:
-    image: ghcr.io/steveiliop56/tinyauth
+    image: ghcr.io/tinyauthapp/tinyauth:v5.1.1
     restart: unless-stopped
     profiles:
       - auth
@@ -20,6 +20,8 @@ services:
       - TINYAUTH_OAUTH_PROVIDERS_POCKETID_SCOPES=openid email profile groups
       - TINYAUTH_OAUTH_PROVIDERS_POCKETID_NAME=Pocket ID
       - TINYAUTH_OAUTH_AUTOREDIRECT=pocketid
+      # Trust Caddy's forwarded client IP headers (required for TinyAuth IP ACLs on v5.1+)
+      - TINYAUTH_AUTH_TRUSTEDPROXIES=172.16.0.0/12
       # Caddy auto-discovery
       - CADDY_DOMAIN=${TINYAUTH_DOMAIN}
       - CADDY_TYPE=${TINYAUTH_TYPE:-external}
