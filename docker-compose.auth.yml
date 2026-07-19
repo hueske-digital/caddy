@@ -1,6 +1,6 @@
 services:
   tinyauth:
-    image: ghcr.io/tinyauthapp/tinyauth:v5.1.1
+    image: ghcr.io/tinyauthapp/tinyauth:latest
     restart: unless-stopped
     profiles:
       - auth
