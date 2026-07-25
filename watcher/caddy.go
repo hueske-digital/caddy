@@ -110,22 +110,81 @@ func (m *CaddyManager) resolveTrustedProxies(entries []string) []string {
 	return allIPs
 }
 
+// ssoCookiePattern removes TinyAuth's cookies from a Cookie header.
+//
+// Two alternatives, and both need care:
+//
+//   ^(?:tinyauth-[^=;]*=[^;]*(?:;\s*|$))+   leading run of TinyAuth cookies
+//   ;\s*tinyauth-[^=;]*=[^;]*               any later one, with its separator
+//
+// The leading alternative repeats (+) on purpose. Replacement scans left to
+// right and never rewinds, so after consuming the first cookie the anchor no
+// longer matches - without the repetition a second consecutive cookie at the
+// start would survive. TinyAuth sets four (session, csrf, redirect, oauth), so
+// that case is the norm, not an edge case.
+//
+// Both alternatives are anchored, either at the start of the header or behind a
+// separator. Matching the bare prefix would eat into unrelated cookies: with an
+// unanchored pattern, "mytinyauth-session=x; a=1" collapses to "mya=1" - a
+// silently corrupted header.
+const ssoCookiePattern = `^(?:tinyauth-[^=;]*=[^;]*(?:;\s*|$))+|;\s*tinyauth-[^=;]*=[^;]*`
+
+// ssoCookieStripDirective returns a header_up directive that removes TinyAuth's
+// session cookies from the request before it reaches the backend.
+//
+// TinyAuth scopes its cookie to the parent domain so single sign-on works across
+// subdomains. The browser therefore sends it to every site under that domain, and
+// without this the backend would see a credential only TinyAuth needs - a
+// compromised backend could replay it against every other protected service.
+//
+// This must sit on the reverse_proxy to the BACKEND, not on the site. A site-level
+// request_header would run before forward_auth, because Caddy sorts header ahead of
+// handle - TinyAuth would then be asked to authenticate a request stripped of its
+// own session and would reject every login. header_up only rewrites the request
+// going upstream, so the forward_auth call is untouched by construction.
+//
+// TinyAuth's own host is exempt: it must still read its session. The cookie names
+// carry a suffix derived from the hostname (tinyauth-session-8b2f3e83, tinyauth-csrf-...),
+// so the prefix is matched instead. The three alternatives cover a cookie appearing
+// first, last, in the middle, or alone, without leaving a stray separator behind.
+func ssoCookieStripDirective(cfg *CaddyConfig) string {
+	tinyauthDomain := strings.TrimSpace(os.Getenv("TINYAUTH_DOMAIN"))
+	if tinyauthDomain != "" {
+		for _, d := range cfg.Domains {
+			if strings.EqualFold(strings.TrimSpace(d), tinyauthDomain) {
+				return ""
+			}
+		}
+	}
+	return `header_up Cookie "` + ssoCookiePattern + `" ""`
+}
+
 // generateReverseProxyBlock generates the reverse_proxy directive with optional trusted_proxies
 // indent is the base indentation (e.g., "        " for 8 spaces)
-// extraDirective is an optional additional directive inside the block (e.g., "header_up X-Real-IP ...")
-func (m *CaddyManager) generateReverseProxyBlock(cfg *CaddyConfig, indent string, extraDirective string) string {
+// extraDirectives are optional additional directives inside the block (e.g., "header_up X-Real-IP ...")
+func (m *CaddyManager) generateReverseProxyBlock(cfg *CaddyConfig, indent string, extraDirectives ...string) string {
 	resolvedProxies := m.resolveTrustedProxies(cfg.TrustedProxies)
 
-	// Simple case: no extra directive and no trusted proxies
-	if extraDirective == "" && len(resolvedProxies) == 0 {
+	var extras []string
+	for _, d := range extraDirectives {
+		if d != "" {
+			extras = append(extras, d)
+		}
+	}
+	if strip := ssoCookieStripDirective(cfg); strip != "" {
+		extras = append(extras, strip)
+	}
+
+	// Simple case: nothing to add
+	if len(extras) == 0 && len(resolvedProxies) == 0 {
 		return indent + "reverse_proxy " + cfg.Upstream
 	}
 
 	// Need block format
 	var lines []string
 	lines = append(lines, indent+"reverse_proxy "+cfg.Upstream+" {")
-	if extraDirective != "" {
-		lines = append(lines, indent+"    "+extraDirective)
+	for _, d := range extras {
+		lines = append(lines, indent+"    "+d)
 	}
 	if len(resolvedProxies) > 0 {
 		lines = append(lines, indent+"    trusted_proxies private_ranges "+strings.Join(resolvedProxies, " "))
@@ -268,7 +327,7 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 
 	// Generate reverse_proxy block for internal and cloudflare types
 	if cfg.Type == TypeInternal {
-		rpBlock := m.generateReverseProxyBlock(cfg, "        ", "")
+		rpBlock := m.generateReverseProxyBlock(cfg, "        ")
 		content = strings.ReplaceAll(content, "{{REVERSE_PROXY_BLOCK}}", rpBlock)
 	} else if cfg.Type == TypeCloudflare {
 		rpBlock := m.generateReverseProxyBlock(cfg, "        ", "header_up X-Real-IP {header.CF-Connecting-IP}")
@@ -318,22 +377,11 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		return ""
 	}
 
-	// Resolve trusted proxies if set
-	resolvedProxies := m.resolveTrustedProxies(cfg.TrustedProxies)
-	trustedProxiesLine := ""
-	if len(resolvedProxies) > 0 {
-		trustedProxiesLine = "\n        trusted_proxies private_ranges " + strings.Join(resolvedProxies, " ")
-	}
-
-	// No allowlist - simple or block reverse_proxy
+	// No allowlist - the shared generator supplies trusted_proxies and, more
+	// importantly, the SSO cookie strip. Building the directive by hand here is
+	// what previously left external backends receiving the TinyAuth cookie.
 	if len(cfg.Allowlist) == 0 {
-		if len(resolvedProxies) == 0 {
-			return fmt.Sprintf(`
-    reverse_proxy %s`, cfg.Upstream)
-		}
-		return fmt.Sprintf(`
-    reverse_proxy %s {%s
-    }`, cfg.Upstream, trustedProxiesLine)
+		return "\n" + m.generateReverseProxyBlock(cfg, "    ")
 	}
 
 	// Get resolved IPs from allowlist manager
@@ -356,13 +404,10 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 		authBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups) + "\n"
 	}
 
-	// Format reverse_proxy with optional trusted_proxies
-	reverseProxyBlock := fmt.Sprintf("reverse_proxy %s", cfg.Upstream)
-	if len(resolvedProxies) > 0 {
-		reverseProxyBlock = fmt.Sprintf(`reverse_proxy %s {
-            trusted_proxies private_ranges %s
-        }`, cfg.Upstream, strings.Join(resolvedProxies, " "))
-	}
+	// Same generator as everywhere else, so the SSO cookie strip is not forgotten
+	// here either. The template below already indents the first line by eight
+	// spaces, so only that leading indentation is removed.
+	reverseProxyBlock := strings.TrimLeft(m.generateReverseProxyBlock(cfg, "        "), " ")
 
 	// Generate allowlist block (private_ranges always allowed for internal access)
 	// Even if DNS fails, we still restrict to private_ranges - never fall back to open access

@@ -33,6 +33,9 @@ services:
       - COMPOSE_PROJECT_NAME
       - NETWORK_SUFFIX=${NETWORK_SUFFIX:-_caddy}
       - HOSTS_DIR=${HOSTS_DIR:-/hosts}
+      # Needed so the watcher can exempt TinyAuth's own host from the SSO cookie
+      # strip - without it TinyAuth could no longer read its own session.
+      - TINYAUTH_DOMAIN=${TINYAUTH_DOMAIN:-}
       - DNS_REFRESH_INTERVAL=${DNS_REFRESH_INTERVAL:-60}
       # Status page: set CADDY_DOMAIN in .env to enable
       - CADDY_DOMAIN=${CADDY_DOMAIN:-}
