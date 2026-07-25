@@ -178,7 +178,7 @@ Available snippets (defined in `hosts/base.conf`):
 - `(compression)` - zstd/gzip compression
 - `(header)` - security headers (HSTS, no indexing, hide server info)
 - `(performance)` - static asset caching (1 year), skip logs for favicon/robots
-- `(security)` - block .env, .git, .bak, .sql, and other sensitive files
+- `(security)` - block .env, .git, .bak, .sql, and other sensitive files; strip the TinyAuth session cookie before proxying upstream
 
 **Opt-in** (enable with `CADDY_*=true`):
 - `(logging)` - request logging to stdout
@@ -203,6 +203,26 @@ make up-auth
 ```
 
 TinyAuth trusts Docker's `172.16.0.0/12` bridge range by default for forwarded client IP headers.
+
+### Session cookie isolation
+
+TinyAuth scopes its session cookie to the parent domain so single sign-on works
+across subdomains. The browser therefore sends it to *every* site under that
+domain, and a reverse proxy would normally hand it to the backend — giving each
+service a credential that only TinyAuth needs. A compromised backend could
+replay that session against every other protected service.
+
+The `(security)` snippet removes the `tinyauth-session` cookie from the request
+before it reaches the backend. `forward_auth` still sees the untouched cookie,
+so authentication is unaffected, and the backend's own cookies are preserved.
+
+`TINYAUTH_DOMAIN` is excluded from the stripping — TinyAuth must keep reading
+its own session. Set it in `.env` whenever you run with auth; the value is
+passed through to the Caddy container automatically.
+
+> **Note:** if you run TinyAuth but leave `TINYAUTH_DOMAIN` unset, its own host
+> gets stripped too and nobody can log in. Deployments without TinyAuth are
+> unaffected — there is no such cookie to remove.
 
 Then enable per service:
 ```yaml
