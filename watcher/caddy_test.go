@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2259,5 +2260,184 @@ func TestWriteConfig_ExternalNoGroupsNoErrors(t *testing.T) {
 	}
 	if strings.Contains(contentStr, "import stealth") {
 		t.Error("unexpected import stealth for external without allowlist")
+	}
+}
+
+// TinyAuth scopes its session cookie to the parent domain, so the browser sends it
+// to every subdomain and the backend would otherwise see a credential it must never
+// have. The strip has to sit on the reverse_proxy to the backend, never on the site:
+// Caddy sorts header ahead of handle, so a site-level request_header would run
+// before forward_auth and TinyAuth would reject every login.
+func TestWriteConfig_StripsSSOCookieTowardsBackend(t *testing.T) {
+	t.Setenv("TINYAUTH_DOMAIN", "login.example.com")
+	tmpDir := t.TempDir()
+	mgr := NewCaddyManager(tmpDir, nil)
+
+	cfg := &CaddyConfig{
+		Network:     "test_caddy",
+		Container:   "test-container",
+		Domains:     []string{"app.example.com"},
+		Type:        "internal",
+		Upstream:    "test-container:80",
+		DNSProvider: "cloudflare",
+		Compression: true,
+		Header:      true,
+		Auth:        true,
+	}
+
+	if err := mgr.WriteConfig(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "internal", "test-container_test_caddy.conf")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	got := string(content)
+
+	if !strings.Contains(got, "header_up Cookie") {
+		t.Error("SECURITY: expected the SSO cookie to be stripped towards the backend")
+	}
+	if !strings.Contains(got, "tinyauth-[^=;]*=[^;]*") {
+		t.Error("SECURITY: expected the cookie name to be matched by prefix, not hardcoded")
+	}
+	// The strip must come after forward_auth, otherwise TinyAuth never sees a session.
+	authAt := strings.Index(got, "forward_auth")
+	stripAt := strings.Index(got, "header_up Cookie")
+	if authAt < 0 || stripAt < 0 || stripAt < authAt {
+		t.Errorf("SECURITY: cookie strip must follow forward_auth, got forward_auth at %d, strip at %d", authAt, stripAt)
+	}
+	// It belongs to the backend proxy, not to the site.
+	if strings.Contains(got, "request_header Cookie") {
+		t.Error("SECURITY: site-level request_header runs before forward_auth and breaks login")
+	}
+}
+
+// TinyAuth's own host must keep its cookie - otherwise it cannot read its session.
+// Checked for every type: an earlier version of this test used the external type,
+// where the strip was never emitted at all, so it passed for the wrong reason.
+func TestWriteConfig_KeepsSSOCookieForTinyAuthItself(t *testing.T) {
+	for _, typ := range []string{"internal", "external", "cloudflare"} {
+		t.Run(typ, func(t *testing.T) {
+			t.Setenv("TINYAUTH_DOMAIN", "login.example.com")
+			tmpDir := t.TempDir()
+			mgr := NewCaddyManager(tmpDir, nil)
+
+			cfg := &CaddyConfig{
+				Network:     "test_caddy",
+				Container:   "tinyauth",
+				Domains:     []string{"login.example.com"},
+				Type:        typ,
+				Upstream:    "tinyauth:3000",
+				DNSProvider: "cloudflare",
+				Compression: true,
+				Header:      true,
+			}
+
+			if err := mgr.WriteConfig(cfg); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			path := filepath.Join(tmpDir, typ, "tinyauth_test_caddy.conf")
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("failed to read config: %v", err)
+			}
+			if strings.Contains(string(content), "header_up Cookie") {
+				t.Error("TinyAuth's own host must keep the cookie, otherwise it cannot read its session")
+			}
+		})
+	}
+}
+
+// Every generated backend proxy must strip the cookie, not just the internal ones.
+// The external paths used to build their reverse_proxy by hand and were skipped.
+func TestWriteConfig_StripsSSOCookieForEveryType(t *testing.T) {
+	cases := []struct {
+		name      string
+		typ       string
+		allowlist []string
+	}{
+		{"internal", "internal", nil},
+		{"cloudflare", "cloudflare", nil},
+		{"external without allowlist", "external", nil},
+		{"external with allowlist", "external", []string{"192.0.2.1"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TINYAUTH_DOMAIN", "login.example.com")
+			tmpDir := t.TempDir()
+			mgr := NewCaddyManager(tmpDir, nil)
+
+			cfg := &CaddyConfig{
+				Network:     "test_caddy",
+				Container:   "test-container",
+				Domains:     []string{"app.example.com"},
+				Type:        c.typ,
+				Upstream:    "test-container:80",
+				Allowlist:   c.allowlist,
+				DNSProvider: "cloudflare",
+				Compression: true,
+				Header:      true,
+			}
+
+			if err := mgr.WriteConfig(cfg); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			path := filepath.Join(tmpDir, c.typ, "test-container_test_caddy.conf")
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("failed to read config: %v", err)
+			}
+			if !strings.Contains(string(content), "header_up Cookie") {
+				t.Errorf("SECURITY: backend still receives the TinyAuth cookie for type %q", c.name)
+			}
+		})
+	}
+}
+
+// The pattern runs inside Caddy against real Cookie headers, so it is verified
+// here with Go's own engine rather than by reading it.
+func TestSSOCookiePattern(t *testing.T) {
+	re, err := regexp.Compile(ssoCookiePattern)
+	if err != nil {
+		t.Fatalf("pattern does not compile: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"alone", "tinyauth-session-8b2f3e83=abc123", ""},
+		{"first", "tinyauth-session-8b2f3e83=abc; sid=42", "sid=42"},
+		{"last", "sid=42; tinyauth-session-8b2f3e83=abc", "sid=42"},
+		{"middle", "a=1; tinyauth-csrf-8b2f3e83=x; b=2", "a=1; b=2"},
+		{"two in the middle", "a=1; tinyauth-session-1=x; tinyauth-csrf-2=y; b=2", "a=1; b=2"},
+		// TinyAuth sets session, csrf, redirect and oauth - all four leading is the norm.
+		{"all four leading", "tinyauth-session-1=a; tinyauth-csrf-1=b; tinyauth-redirect-1=c; tinyauth-oauth-1=d", ""},
+		{"leading run then foreign", "tinyauth-session-1=a; tinyauth-csrf-1=b; sid=9", "sid=9"},
+		{"scattered", "tinyauth-a=1; x=2; tinyauth-b=3; y=4", "x=2; y=4"},
+		{"none", "sid=42; theme=dark", "sid=42; theme=dark"},
+		{"empty", "", ""},
+		{"value contains equals", "a=1; tinyauth-session-1=abc==; b=2", "a=1; b=2"},
+		{"no space after semicolon", "a=1;tinyauth-x=1;b=2", "a=1;b=2"},
+		// Without anchoring these would be cut mid-name and corrupt the header.
+		{"foreign prefix", "mytinyauth-session=x; a=1", "mytinyauth-session=x; a=1"},
+		{"foreign similar name", "tinyauthx=1; a=1", "tinyauthx=1; a=1"},
+		{"tinyauth only as value", "session=tinyauth-foo; a=1", "session=tinyauth-foo; a=1"},
+		{"foreign prefix in the middle", "a=1; xtinyauth-session=y; b=2", "a=1; xtinyauth-session=y; b=2"},
+		{"foreign prefix leading", "xtinyauth-a=1; b=2", "xtinyauth-a=1; b=2"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := re.ReplaceAllString(c.in, ""); got != c.want {
+				t.Errorf("SECURITY: %q\n  got  %q\n  want %q", c.in, got, c.want)
+			}
+		})
 	}
 }
