@@ -14,6 +14,9 @@ services:
       - CF_API_TOKEN
       - HETZNER_API_TOKEN
       - EMAIL
+      # Excluded from SSO cookie stripping in (security) - TinyAuth must keep
+      # reading its own session cookie
+      - TINYAUTH_DOMAIN=${TINYAUTH_DOMAIN:-tinyauth.invalid}
     entrypoint: /docker/entrypoint.sh
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
