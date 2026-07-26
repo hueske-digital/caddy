@@ -148,23 +148,37 @@ func validateFileExtension(ext string) error {
 
 // validateAuthURL prueft CADDY_AUTH_URL. Der Wert wird zum Upstream eines
 // forward_auth, ein Container kann Caddy damit zu Requests an beliebige
-// erreichbare Hosts bewegen. Erlaubt sind daher nur http/https bzw. host:port,
-// ohne Userinfo, Pfad, Query oder Fragment.
+// erreichbare Hosts bewegen.
+//
+// Verlangt wird ausdruecklich "https://". Zwei Gruende:
+//
+// Erstens laufen ueber diese Verbindung Identitaetsdaten - die Antwort des
+// Auth-Servers entscheidet ueber den Zugang und liefert Remote-User/-Groups.
+// Ueber Klartext-HTTP ist beides mitlesbar und manipulierbar.
+//
+// Zweitens haengt daran ein Auth-Bypass: bei Upstreams OHNE TLS gibt Caddy den
+// Host des Clients an den Auth-Server weiter (PR #7454 deckt nur TLS ab). Ist
+// der Auth-Server selbst ein Caddy, passt die Anfrage dort zu keinem Site-Block,
+// und die Antwort auf einen unbekannten Host ist "200, 0 Bytes" - was
+// forward_auth als "authentifiziert" liest.
+//
+// Die schemalose Form "host:port" ist deshalb ebenfalls unzulaessig: sie ist
+// Klartext-HTTP und faellt damit unter denselben Fall.
 func validateAuthURL(raw string) error {
 	if containsCaddyfileMeta(raw) {
 		return fmt.Errorf("invalid auth URL: %q (contains illegal characters)", raw)
 	}
 
 	if !strings.Contains(raw, "://") {
-		return validateHostPort(raw)
+		return fmt.Errorf("invalid auth URL: %q (must start with https://)", raw)
 	}
 
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("invalid auth URL: %q (%v)", raw, err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("invalid auth URL: %q (scheme must be http or https)", raw)
+	if u.Scheme != "https" {
+		return fmt.Errorf("invalid auth URL: %q (must use https, plaintext exposes identity headers and enables an auth bypass)", raw)
 	}
 	if u.User != nil {
 		return fmt.Errorf("invalid auth URL: %q (userinfo not allowed)", raw)

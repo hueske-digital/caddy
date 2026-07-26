@@ -59,7 +59,7 @@ services:
       - CADDY_ALLOWLIST=home.dyndns.org      # IP allowlist (external only)
       - CADDY_TRUSTED_PROXIES=192.168.1.1    # IPs/hostnames for X-Forwarded-* trust
       - CADDY_AUTH=true                      # Enable forward auth (requires tinyauth)
-      - CADDY_AUTH_URL=https://login.example.com  # Custom auth server (default: local tinyauth)
+      - CADDY_AUTH_URL=https://login.example.com  # Custom auth server, https only (default: local tinyauth)
       - CADDY_AUTH_PATHS=/admin/*,/api/*     # Protect only these paths (default: entire site)
       - CADDY_AUTH_EXCEPT=/health,/api/public/*  # Protect all EXCEPT these paths
       - CADDY_AUTH_GROUPS=admins,editors     # Restrict to users in these groups
@@ -132,6 +132,12 @@ CADDY_ALLOWLIST=home.dyndns.org,office.example.com,1.2.3.4
 - Non-matching requests: connection aborted
 
 ### Trusted Proxies
+
+`CADDY_AUTH_URL` requires `https://`. Plaintext is rejected: the response decides
+access and carries `Remote-User`/`Remote-Groups`, and for non-TLS upstreams Caddy
+forwards the client's `Host` to the auth server — if that server is itself a Caddy,
+the request matches no site block there and the reply to an unknown host is
+`200` with an empty body, which `forward_auth` reads as "authenticated".
 
 When using `CADDY_AUTH_URL` with an external auth server (e.g., on another host), the auth server needs to trust X-Forwarded-* headers from Caddy:
 

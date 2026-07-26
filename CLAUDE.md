@@ -62,6 +62,7 @@ caddy/
 | `CADDY_ALLOWLIST` | No | IPs/hostnames for allowlist (external only) |
 | `CADDY_TRUSTED_PROXIES` | No | IPs/hostnames for X-Forwarded-* trust |
 | `CADDY_AUTH` | No | Enable forward auth (true/false) |
+| `CADDY_AUTH_URL` | No | External auth server, **https only** (default: local tinyauth) |
 | `CADDY_AUTH_PATHS` | No | Protect only these paths (comma-separated) |
 | `CADDY_AUTH_EXCEPT` | No | Protect all EXCEPT these paths (comma-separated) |
 | `CADDY_AUTH_GROUPS` | No | Restrict access to users with these groups (comma-separated) |

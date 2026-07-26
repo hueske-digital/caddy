@@ -141,15 +141,16 @@ func TestParseCaddyEnv_AcceptsValidValues(t *testing.T) {
 		t.Fatalf("unexpected rejection of valid config: %v", err)
 	}
 
-	// Auth-Upstreams: bracketed IPv6 (auch mit Zone), host:port, Containername
-	// mit Unterstrich - Docker erlaubt den, oeffentliches DNS nicht.
+	// Auth-Upstreams: nur https, aber dort alle gaengigen Schreibweisen -
+	// bracketed IPv6 und Containernamen mit Unterstrich, die Docker erlaubt und
+	// oeffentliches DNS nicht. (Ein Zone-Index muesste in URL-Form "%25eth0"
+	// geschrieben werden; als Auth-Server praktisch irrelevant.)
 	for _, authURL := range []string{
 		"https://[2001:db8::1]",
-		"http://[2001:db8::1]:3000",
-		"[fe80::1%eth0]:443",
-		"tinyauth:3000",
-		"auth_service:3000",
-		"http://auth.example.com:8080",
+		"https://[2001:db8::1]:3000",
+		"https://tinyauth:3000",
+		"https://auth_service:3000",
+		"https://auth.example.com:8080",
 	} {
 		env := baseEnv(map[string]string{"CADDY_AUTH": "true", "CADDY_AUTH_URL": authURL})
 		if _, err := ParseCaddyEnv(env, "test_caddy", "test-container"); err != nil {
@@ -165,13 +166,51 @@ func TestParseCaddyEnv_AuthURLProducesValidUpstream(t *testing.T) {
 	for _, authURL := range []string{
 		"https://auth.example.com/",     // Pfad ist in Upstream-Adressen verboten
 		"https://auth.example.com/auth", // dito
-		"2001:db8::1",                   // IPv6 ohne Klammern
+		"https://2001:db8::1",           // IPv6 ohne Klammern
 		"https://auth.example.com?x=1",
 		"https://auth.example.com:0",
+		// Klartext ist unzulaessig: die Antwort entscheidet ueber den Zugang
+		// und traegt Remote-User/-Groups. Bei Upstreams ohne TLS gibt Caddy
+		// zudem den Client-Host weiter, was einen Auth-Bypass ermoeglicht.
+		"http://auth.example.com",
+		"http://auth.example.com:8080",
+		"tinyauth:3000",    // schemalos = Klartext-HTTP
+		"auth.example.com", // dito
 	} {
 		env := baseEnv(map[string]string{"CADDY_AUTH": "true", "CADDY_AUTH_URL": authURL})
 		if _, err := ParseCaddyEnv(env, "test_caddy", "test-container"); err == nil {
 			t.Errorf("auth URL %q: expected rejection", authURL)
+		}
+	}
+}
+
+// TestValidateAuthURL_HTTPSOnly haelt die aeussere Verteidigungslinie fest.
+//
+// Bei Auth-Upstreams ohne TLS gibt Caddy den Host des Clients weiter (PR #7454
+// deckt nur TLS ab). Ist der Auth-Server selbst ein Caddy, passt die Anfrage
+// dort zu keinem Site-Block und die Antwort ist "200, 0 Bytes" - was
+// forward_auth als "authentifiziert" liest. Die innere Linie
+// (header_up Host im erzeugten Block) prueft test/auth-bypass.sh.
+func TestValidateAuthURL_HTTPSOnly(t *testing.T) {
+	for _, raw := range []string{
+		"http://auth.example.com",
+		"http://auth.example.com:8080",
+		"tinyauth:3000",
+		"auth.example.com",
+		"//auth.example.com",
+		"HTTP://auth.example.com",
+	} {
+		if err := validateAuthURL(raw); err == nil {
+			t.Errorf("%q: expected rejection (plaintext auth upstream)", raw)
+		}
+	}
+	for _, raw := range []string{
+		"https://auth.example.com",
+		"https://auth.example.com:8443",
+		"https://tinyauth:3000",
+	} {
+		if err := validateAuthURL(raw); err != nil {
+			t.Errorf("%q: unexpected rejection: %v", raw, err)
 		}
 	}
 }

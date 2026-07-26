@@ -544,6 +544,11 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		authServer = authURL
 		// Bei http:// MUSS der Host explizit auf den Upstream gesetzt werden.
 		//
+		// validateAuthURL laesst inzwischen nur https:// durch, dieser Zweig ist
+		// also nicht mehr erreichbar. Er bleibt als zweite Verteidigungslinie
+		// stehen: wird die Validierung je gelockert, ist der Bypass unten nicht
+		// sofort wieder offen. test/auth-bypass.sh prueft beide Ebenen.
+		//
 		// Sonst traegt die forward_auth-Unteranfrage den Host des CLIENTS. Ist
 		// der Auth-Server selbst ein Caddy, passt sie dort zu keinem
 		// Site-Block, und Caddy antwortet auf einen nicht zuordenbaren Host mit
