@@ -694,7 +694,6 @@ func TestSSOCookieStripScope(t *testing.T) {
 	t.Run("innerhalb des Scopes wird gestrippt", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
 		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
-		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
 
 		for _, d := range []string{"hueske.digital", "kunde.hueske.digital", "a.b.hueske.digital"} {
 			if ssoCookieStripDirective(site(d)) == "" {
@@ -706,7 +705,6 @@ func TestSSOCookieStripScope(t *testing.T) {
 	t.Run("fremde Domain wird nicht gestrippt", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
 		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
-		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
 
 		for _, d := range []string{
 			"heimatverein-leteln.de",
@@ -724,7 +722,6 @@ func TestSSOCookieStripScope(t *testing.T) {
 	t.Run("eine Domain im Scope genuegt", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
 		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
-		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
 
 		if ssoCookieStripDirective(site("kunde.de", "kunde.hueske.digital")) == "" {
 			t.Error("erwartet Strip, wenn mindestens eine Domain im Scope liegt")
@@ -734,28 +731,42 @@ func TestSSOCookieStripScope(t *testing.T) {
 	t.Run("unbekannter Scope strippt ueberall", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "")
 		t.Setenv("TINYAUTH_DOMAIN", "")
-		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
 
 		if ssoCookieStripDirective(site("heimatverein-leteln.de")) == "" {
 			t.Error("ohne bekannten Scope muss sicherheitshalber gestrippt werden")
 		}
 	})
 
-	t.Run("expliziter Scope schlaegt die Ableitung", func(t *testing.T) {
+	t.Run("mehrstufiger Host laesst den Scope offen", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		// Bei auth.sub.hueske.digital ist nicht entscheidbar, ob der Cookie auf
+		// .sub.hueske.digital oder .hueske.digital liegt. Eine Ableitung auf
+		// sub.hueske.digital waere zu eng - dann bliebe das Cookie auf
+		// kunde.hueske.digital stehen. Also lieber ueberall strippen.
 		t.Setenv("TINYAUTH_DOMAIN", "auth.sub.hueske.digital")
-		t.Setenv("TINYAUTH_COOKIE_DOMAIN", ".hueske.digital")
 
-		// Ohne Override waere der Scope sub.hueske.digital - zu eng.
+		for _, d := range []string{"kunde.hueske.digital", "heimatverein-leteln.de"} {
+			if ssoCookieStripDirective(site(d)) == "" {
+				t.Errorf("%s: bei unklarem Scope muss gestrippt werden", d)
+			}
+		}
+	})
+
+	t.Run("zweiteiliger Host wird nicht weiter verkuerzt", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "hueske.digital")
+
 		if ssoCookieStripDirective(site("kunde.hueske.digital")) == "" {
-			t.Error("TINYAUTH_COOKIE_DOMAIN wurde nicht beruecksichtigt")
+			t.Error("Subdomain im Scope muss gestrippt werden")
+		}
+		if got := ssoCookieStripDirective(site("heimatverein-leteln.de")); got != "" {
+			t.Errorf("fremde Domain unerwartet gestrippt: %s", got)
 		}
 	})
 
 	t.Run("TinyAuths eigener Host bleibt ausgenommen", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
 		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
-		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
 
 		own := site("auth.hueske.digital")
 		own.Container = "caddy-tinyauth-1"

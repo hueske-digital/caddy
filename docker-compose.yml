@@ -36,10 +36,6 @@ services:
       # Needed so the watcher can exempt TinyAuth's own host from the SSO cookie
       # strip - without it TinyAuth could no longer read its own session.
       - TINYAUTH_DOMAIN=${TINYAUTH_DOMAIN:-}
-      # Geltungsbereich der TinyAuth-Cookies. Ohne Angabe aus TINYAUTH_DOMAIN
-      # abgeleitet (auth.example.com -> example.com). Nur Sites darunter
-      # bekommen den Cookie-Strip - andere Domains sehen das Cookie nie.
-      - TINYAUTH_COOKIE_DOMAIN=${TINYAUTH_COOKIE_DOMAIN:-}
       - DNS_REFRESH_INTERVAL=${DNS_REFRESH_INTERVAL:-60}
       # Wartezeit, bevor die Config eines verschwundenen Containers entfernt
       # wird. Muss deutlich ueber dem laengsten Update-Fenster liegen - waehrend
