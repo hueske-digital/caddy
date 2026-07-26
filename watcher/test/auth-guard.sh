@@ -136,6 +136,21 @@ auth_logic() {
     cat "$WORKDIR/groups.block"
     echo '	respond "USER=[{header.Remote-User}] GROUPS=[{header.Remote-Groups}]" 200'
     echo '}'
+    # Dieselbe Auth, aber im remote_ip-Fall: bei einer Allowlist steckt der
+    # Auth-Block in einem handle @allowed, also an einer strukturell anderen
+    # Stelle. Geprueft wird, dass Scrub und Gruppen dort genauso greifen.
+    echo 'http://:9004 {'
+    echo '	@allowed {'
+    echo '		remote_ip private_ranges'
+    echo '	}'
+    echo '	handle @allowed {'
+    cat "$WORKDIR/groups.block"
+    echo '		respond "USER=[{header.Remote-User}] GROUPS=[{header.Remote-Groups}]" 200'
+    echo '	}'
+    echo '	handle {'
+    echo '		error 404'
+    echo '	}'
+    echo '}'
 } > "$WORKDIR/Caddyfile"
 
 info "Caddy starten"
@@ -143,7 +158,7 @@ docker rm -f "$CONTAINER" >/dev/null 2>&1
 docker run -d --name "$CONTAINER" \
     --add-host auth.local:127.0.0.1 \
     -v "$WORKDIR/Caddyfile:/etc/caddy/Caddyfile:ro" \
-    -p 19501:9001 -p 19502:9002 -p 19503:9003 "$CADDY_IMAGE" >/dev/null 2>&1
+    -p 19501:9001 -p 19502:9002 -p 19503:9003 -p 19504:9004 "$CADDY_IMAGE" >/dev/null 2>&1
 sleep 6
 
 if ! docker ps --filter "name=$CONTAINER" --format '{{.ID}}' | grep -q .; then
@@ -209,37 +224,44 @@ scenario 19502 "Auth ueber https:// - Caddy setzt den Host selbst (PR #7454)"
 # Geprueft wird, dass der Gruppen-Check der AUTH-ANTWORT folgt und nicht dem,
 # was der Client schickt - und dass auf Pfaden ohne Auth keine vom Client
 # gesetzten Remote-*-Header ans Backend gelangen.
-ask() { # ask <pfad> <header...>
-    local path="$1"; shift
-    curl -s -w ' [%{http_code}]' -H "Host: app.local" "$@" "http://localhost:19503$path" 2>/dev/null
+ask() { # ask <port> <pfad> <header...>
+    local port="$1" path="$2"; shift 2
+    curl -s -w ' [%{http_code}]' -H "Host: app.local" "$@" "http://localhost:$port$path" 2>/dev/null
 }
 
-echo; echo "── Gruppen-Beschraenkung (CADDY_AUTH_GROUPS)"
-res="$(ask /admin/x -H 'X-Allow: yes' -H 'X-Groups: admins')"
-case "$res" in
-    *"GROUPS=[admins]"*"[200]") ok "passende Gruppe wird durchgelassen" ;;
-    *) bad "passende Gruppe abgelehnt: $res" ;;
-esac
+identity_scenario() { # identity_scenario <port> <label>
+    local port="$1" label="$2" res
 
-res="$(ask /admin/x -H 'X-Allow: yes' -H 'X-Groups: users')"
-case "$res" in
-    *"[403]") ok "fremde Gruppe wird mit 403 abgewiesen" ;;
-    *) bad "fremde Gruppe NICHT abgewiesen: $res" ;;
-esac
+    echo; echo "── $label: Gruppen-Beschraenkung"
+    res="$(ask "$port" /admin/x -H 'X-Allow: yes' -H 'X-Groups: admins')"
+    case "$res" in
+        *"GROUPS=[admins]"*"[200]") ok "passende Gruppe wird durchgelassen" ;;
+        *) bad "passende Gruppe abgelehnt: $res" ;;
+    esac
 
-echo; echo "── Gruppen sind nicht faelschbar"
-res="$(ask /admin/x -H 'X-Allow: yes' -H 'X-Groups: users' -H 'Remote-Groups: admins')"
-case "$res" in
-    *"[403]") ok "vom Client gesetztes Remote-Groups wird ignoriert" ;;
-    *) bad "GRUPPEN-BYPASS: Client-Header hat entschieden: $res" ;;
-esac
+    res="$(ask "$port" /admin/x -H 'X-Allow: yes' -H 'X-Groups: users')"
+    case "$res" in
+        *"[403]") ok "fremde Gruppe wird mit 403 abgewiesen" ;;
+        *) bad "fremde Gruppe NICHT abgewiesen: $res" ;;
+    esac
 
-echo; echo "── Pfade ohne Auth: Identitaets-Header werden entfernt"
-res="$(ask /public -H 'Remote-User: angreifer' -H 'Remote-Groups: admins')"
-case "$res" in
-    *"USER=[] GROUPS=[]"*) ok "gefaelschte Remote-*-Header erreichen das Backend nicht" ;;
-    *) bad "HEADER-SPOOFING: Backend sieht Client-Header: $res" ;;
-esac
+    echo; echo "── $label: Gruppen sind nicht faelschbar"
+    res="$(ask "$port" /admin/x -H 'X-Allow: yes' -H 'X-Groups: users' -H 'Remote-Groups: admins')"
+    case "$res" in
+        *"[403]") ok "vom Client gesetztes Remote-Groups wird ignoriert" ;;
+        *) bad "GRUPPEN-BYPASS: Client-Header hat entschieden: $res" ;;
+    esac
+
+    echo; echo "── $label: Pfade ohne Auth, Identitaets-Header werden entfernt"
+    res="$(ask "$port" /public -H 'Remote-User: angreifer' -H 'Remote-Groups: admins')"
+    case "$res" in
+        *"USER=[] GROUPS=[]"*) ok "gefaelschte Remote-*-Header erreichen das Backend nicht" ;;
+        *) bad "HEADER-SPOOFING: Backend sieht Client-Header: $res" ;;
+    esac
+}
+
+identity_scenario 19503 "einfache Site"
+identity_scenario 19504 "mit Allowlist (Auth in handle @allowed)"
 
 # ── Zustand der Ursache in Caddy, nur Bericht ────────────────────────────────
 echo; echo "── Ursache in Caddy (nur Bericht, kein Fehler)"

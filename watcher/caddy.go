@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // Embedded templates for Caddyfile generation
@@ -189,29 +191,33 @@ func ssoCookieStripDirective(cfg *CaddyConfig) string {
 //
 // TinyAuth setzt seine Cookies auf die registrierbare Domain, damit SSO ueber
 // alle Subdomains funktioniert: Domain=.example.com, unabhaengig davon, wie tief
-// TINYAUTH_DOMAIN selbst liegt. Genommen werden deshalb die letzten zwei Labels.
+// TINYAUTH_DOMAIN selbst liegt.
 //
-//	auth.example.com      -> example.com
-//	auth.sub.example.com  -> example.com
-//	example.com           -> example.com
+// Ermittelt wird sie ueber die Public Suffix List, nicht durch Zaehlen von
+// Labels. Eine Faustregel "letzte zwei Labels" liegt bei mehrteiligen Endungen
+// daneben: aus auth.example.co.uk wuerde co.uk, und aus auth.example.github.io
+// wuerde github.io - beides sind Public Suffixes, keine registrierbaren Domains.
 //
-// Bei mehrteiligen TLDs (auth.example.co.uk) ergibt das co.uk und damit einen zu
-// WEITEN Scope. Das ist die unschaedliche Richtung: zu weit heisst ueberfluessig
-// strippen. Zu eng waere gefaehrlich - dann bliebe eine Kredential auf einer
-// Site stehen, die sie erhaelt. Breiter als die registrierbare Domain kann ein
-// Cookie nicht liegen, Browser lehnen Public Suffixes ab; die Ableitung kann
-// also nie zu eng ausfallen.
+// Scheitert die Ermittlung - etwa weil der Host selbst ein Public Suffix ist
+// oder die Endung unbekannt -, bleibt der Scope offen und es wird ueberall
+// gestrippt. Das ist die unschaedliche Richtung: zu weit heisst ueberfluessig
+// strippen, zu eng liesse eine Kredential auf einer Site stehen, die sie erhaelt.
+//
+// Die Liste ist im Paket einkompiliert und altert mit der Abhaengigkeit. Fuer
+// eine neue Endung faellt der Scope dann offen aus - also wieder in die
+// unschaedliche Richtung.
 func tinyauthCookieDomain() string {
 	host := strings.ToLower(strings.TrimSpace(os.Getenv("TINYAUTH_DOMAIN")))
 	if host == "" {
 		return ""
 	}
 
-	labels := strings.Split(host, ".")
-	if len(labels) <= 2 {
-		return host
+	scope, err := publicsuffix.EffectiveTLDPlusOne(host)
+	if err != nil {
+		log.Printf("Cannot determine cookie scope for TINYAUTH_DOMAIN=%q (%v) - stripping the SSO cookie on all sites", host, err)
+		return ""
 	}
-	return strings.Join(labels[len(labels)-2:], ".")
+	return scope
 }
 
 // inTinyauthCookieScope prueft, ob eine Site das TinyAuth-Cookie ueberhaupt
@@ -640,11 +646,12 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 			quoted[i] = regexp.QuoteMeta(g)
 		}
 		groupsRegex := fmt.Sprintf("(^|,)(%s)(,|$)", strings.Join(quoted, "|"))
+		// Die Matcher-Definition bleibt auf Site-Ebene, die error-Direktive
+		// wandert in den route-Block - dort entscheidet die Reihenfolge.
 		groupsBlock = fmt.Sprintf(`
     @auth-groups-denied {%s
         not header_regexp Remote-Groups %s
-    }
-    error @auth-groups-denied 403`, "%s", groupsRegex)
+    }`, "%s", groupsRegex)
 	}
 
 	// Full site auth (no paths, no except)
@@ -654,9 +661,10 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
         copy_headers Remote-User Remote-Email Remote-Groups%s
     }`, authServer, headerUp)
 		if len(groups) > 0 {
-			// No path restriction for groups check
-			groupsBlockFull := fmt.Sprintf(groupsBlock, "")
-			result += groupsBlockFull
+			// No path restriction for groups check. Die error-Direktive gehoert
+			// hier direkt hinter den Matcher - ohne route-Block entscheidet
+			// Caddys eigene Reihenfolge, und die passt fuer error/forward_auth.
+			result += fmt.Sprintf(groupsBlock, "") + "\n    error @auth-groups-denied 403"
 		}
 		return result
 	}
@@ -664,67 +672,82 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	// Auth with except paths (protect all EXCEPT these)
 	if len(except) > 0 {
 		exceptList := strings.Join(except, " ")
-		result := fmt.Sprintf(`    @auth-paths not path %s
-    forward_auth @auth-paths %s {
+		forwardAuth := fmt.Sprintf(`forward_auth @auth-paths %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
-    }`, exceptList, authServer, headerUp)
+    }`, authServer, headerUp)
+
+		matchers := fmt.Sprintf("    @auth-paths not path %s", exceptList)
+		groupsError := ""
 		if len(groups) > 0 {
-			// Add path restriction to groups check
 			pathCondition := fmt.Sprintf("\n        not path %s", exceptList)
-			groupsBlockWithPath := fmt.Sprintf(groupsBlock, pathCondition)
-			result += groupsBlockWithPath
+			matchers += fmt.Sprintf(groupsBlock, pathCondition)
+			groupsError = "    error @auth-groups-denied 403"
 		}
-		return result + generateAuthScrubBlock(nil, except)
+		return matchers + "\n" + wrapAuthInRoute("    "+forwardAuth, groupsError)
 	}
 
 	// Path-based auth (protect only these paths)
 	pathList := strings.Join(paths, " ")
-	result := fmt.Sprintf(`    @auth-paths path %s
-    forward_auth @auth-paths %s {
+	forwardAuth := fmt.Sprintf(`forward_auth @auth-paths %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
-    }`, pathList, authServer, headerUp)
+    }`, authServer, headerUp)
+
+	matchers := fmt.Sprintf("    @auth-paths path %s", pathList)
+	groupsError := ""
 	if len(groups) > 0 {
-		// Add path restriction to groups check
 		pathCondition := fmt.Sprintf("\n        path %s", pathList)
-		groupsBlockWithPath := fmt.Sprintf(groupsBlock, pathCondition)
-		result += groupsBlockWithPath
+		matchers += fmt.Sprintf(groupsBlock, pathCondition)
+		groupsError = "    error @auth-groups-denied 403"
 	}
-	return result + generateAuthScrubBlock(paths, nil)
+	return matchers + "\n" + wrapAuthInRoute("    "+forwardAuth, groupsError)
 }
 
-// generateAuthScrubBlock verhindert, dass ein Client die Identitaets-Header
-// vortaeuscht, die forward_auth sonst setzt.
+// wrapAuthInRoute setzt einen bedingungslosen Scrub der Identitaets-Header vor
+// forward_auth und schliesst beides in einen route-Block ein.
 //
-// Auf Pfaden, die forward_auth abdeckt, ist das bereits sicher: copy_headers
-// loescht Remote-User/-Email/-Groups erst und setzt sie dann aus der
-// Auth-Antwort. Offen sind genau die Pfade, auf denen forward_auth NICHT
-// laeuft - dort reicht ein vom Client gesetztes Remote-User unveraendert bis
-// zum Backend, und Backends vertrauen genau diesen Headern.
+// Warum ueberhaupt scrubben: das Backend erfaehrt nur ueber Remote-User,
+// Remote-Email und Remote-Groups, wer angemeldet ist - genau dafuer kopiert
+// forward_auth sie. Es sind aber gewoehnliche HTTP-Header, die jeder Client
+// selbst mitschicken kann. Laeuft forward_auth nur auf bestimmten Pfaden
+// (CADDY_AUTH_PATHS/-EXCEPT), greift auf allen anderen niemand ein: ein
+// "Remote-User: admin" vom Client landet unveraendert beim Backend.
 //
-// Der Matcher ist deshalb die Umkehrung des Auth-Matchers. Ein Scrub ohne
-// Matcher waere falsch: Caddy ordnet request_header NACH forward_auth (mit
-// "caddy adapt" geprueft), er wuerde also genau die Header wieder entfernen,
-// die forward_auth gerade aus der Auth-Antwort gesetzt hat.
+// Warum route: Caddy sortiert request_header NACH forward_auth ein. Ein Scrub
+// ausserhalb eines route-Blocks wuerde also genau die Header entfernen, die
+// forward_auth gerade aus der Auth-Antwort gesetzt hat - jede Anmeldung waere
+// kaputt. Innerhalb von route gilt die geschriebene Reihenfolge, deshalb kann
+// hier zuerst bedingungslos geloescht und danach gesetzt werden.
 //
-// Deckt forward_auth die ganze Site ab, ist nichts zu tun.
-func generateAuthScrubBlock(paths []string, except []string) string {
-	var matcher string
-	switch {
-	case len(paths) > 0:
-		matcher = "not path " + strings.Join(paths, " ")
-	case len(except) > 0:
-		matcher = "path " + strings.Join(except, " ")
-	default:
-		return ""
+// Der Vorteil gegenueber einem Scrub mit eigenem Matcher: dort muesste der
+// Matcher das exakte Komplement des Auth-Matchers sein ("not path" zu "path").
+// Das ist sicher, solange beide gespiegelt bleiben - hier ist eine Luecke
+// konstruktiv nicht moeglich, weil ohne Auth einfach nichts gesetzt wird.
+//
+// Bei Full-Site-Auth wird das nicht gebraucht: forward_auth deckt jeden Pfad ab
+// und copy_headers loescht die Header ohnehin erst und setzt sie dann neu.
+func wrapAuthInRoute(forwardAuth, groupsError string) string {
+	lines := []string{
+		"    route {",
+		"        request_header -Remote-User",
+		"        request_header -Remote-Email",
+		"        request_header -Remote-Groups",
 	}
-
-	return fmt.Sprintf(`
-    @auth-scrub %s
-    request_header @auth-scrub -Remote-User
-    request_header @auth-scrub -Remote-Email
-    request_header @auth-scrub -Remote-Groups`, matcher)
+	for _, l := range strings.Split(forwardAuth, "\n") {
+		if l == "" {
+			continue
+		}
+		lines = append(lines, "    "+l)
+	}
+	for _, l := range strings.Split(groupsError, "\n") {
+		if l == "" {
+			continue
+		}
+		lines = append(lines, "    "+l)
+	}
+	lines = append(lines, "    }")
+	return strings.Join(lines, "\n")
 }
 
 // generateSEONoindexTypesBlock generates a matcher and header directive to noindex specific file types

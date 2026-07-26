@@ -752,14 +752,55 @@ func TestSSOCookieStripScope(t *testing.T) {
 		}
 	})
 
-	t.Run("mehrteiliges TLD faellt zu weit aus, nicht zu eng", func(t *testing.T) {
-		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
-		t.Setenv("TINYAUTH_DOMAIN", "auth.example.co.uk")
+	// Genau die Faelle, bei denen "letzte zwei Labels" danebenliegt: co.uk und
+	// github.io sind Public Suffixes, keine registrierbaren Domains. Die
+	// Faustregel haette den Scope dorthin gelegt und damit fremde Kundendomains
+	// mitgestrippt.
+	t.Run("mehrteilige Endungen werden korrekt aufgeloest", func(t *testing.T) {
+		cases := []struct {
+			authDomain string
+			imScope    string
+			fremd      string
+		}{
+			{"auth.example.co.uk", "kunde.example.co.uk", "example2.co.uk"},
+			{"auth.example.github.io", "kunde.example.github.io", "fremd.github.io"},
+			{"auth.hueske.digital", "status.hueske.digital", "heimatverein-leteln.de"},
+		}
+		for _, c := range cases {
+			t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+			t.Setenv("TINYAUTH_DOMAIN", c.authDomain)
 
-		// Scope wird co.uk - zu weit, aber harmlos. Entscheidend ist, dass die
-		// tatsaechlich betroffene Site gestrippt wird.
-		if ssoCookieStripDirective(site("kunde.example.co.uk")) == "" {
-			t.Error("Site im echten Cookie-Scope wurde nicht gestrippt")
+			if ssoCookieStripDirective(site(c.imScope)) == "" {
+				t.Errorf("%s: %s liegt im Cookie-Scope, wurde aber nicht gestrippt", c.authDomain, c.imScope)
+			}
+			if got := ssoCookieStripDirective(site(c.fremd)); got != "" {
+				t.Errorf("%s: %s liegt ausserhalb, wurde aber gestrippt", c.authDomain, c.fremd)
+			}
+		}
+	})
+
+	t.Run("unbekannte Endung gilt als einlabelig", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		// Bei einer nicht gelisteten Endung ist die registrierbare Domain
+		// auth.intern selbst - der Cookie liegt also auf .auth.intern.
+		t.Setenv("TINYAUTH_DOMAIN", "auth.intern")
+
+		if ssoCookieStripDirective(site("sub.auth.intern")) == "" {
+			t.Error("Subdomain im Scope wurde nicht gestrippt")
+		}
+		if got := ssoCookieStripDirective(site("anders.intern")); got != "" {
+			t.Errorf("Domain ausserhalb des Scopes gestrippt: %s", got)
+		}
+	})
+
+	t.Run("nicht ermittelbarer Scope strippt ueberall", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		// Einzelnes Label - daraus laesst sich keine registrierbare Domain
+		// ableiten, also sicherheitshalber ueberall strippen.
+		t.Setenv("TINYAUTH_DOMAIN", "localhost")
+
+		if ssoCookieStripDirective(site("heimatverein-leteln.de")) == "" {
+			t.Error("bei nicht ermittelbarem Scope muss ueberall gestrippt werden")
 		}
 	})
 
@@ -914,36 +955,77 @@ func TestPruneUnknownNetworks_LeavesManualConfigsAlone(t *testing.T) {
 	}
 }
 
-// TestAuthScrub_ScopedToUnprotectedPaths deckt H1 ab.
+// TestAuthScrub_UnconditionalInsideRoute deckt H1 ab.
 //
-// Auf Pfaden, die forward_auth abdeckt, setzt copy_headers die Header aus der
-// Auth-Antwort (loeschen, dann setzen) - dort darf nicht zusaetzlich gescrubbt
-// werden, sonst kaeme beim Backend gar keine Identitaet an. Caddy ordnet
-// request_header naemlich NACH forward_auth ein.
-func TestAuthScrub_ScopedToUnprotectedPaths(t *testing.T) {
-	t.Run("paths mode scrubs the inverse", func(t *testing.T) {
-		block := generateAuthBlock("", []string{"/admin/*"}, nil, nil)
-		if !strings.Contains(block, "@auth-scrub not path /admin/*") {
-			t.Errorf("expected inverted scrub matcher, got:\n%s", block)
+// Das Backend erfaehrt nur ueber Remote-User/-Email/-Groups, wer angemeldet ist.
+// Das sind gewoehnliche Header, die jeder Client mitschicken kann. Laeuft
+// forward_auth nur auf bestimmten Pfaden, greift auf den anderen niemand ein.
+//
+// Geloescht wird deshalb BEDINGUNGSLOS und innerhalb eines route-Blocks vor
+// forward_auth - dort gilt die geschriebene Reihenfolge, waehrend Caddy sonst
+// request_header dahinter einsortiert. Ein Scrub mit eigenem Matcher waere nur
+// so lange sicher, wie der Matcher das exakte Komplement des Auth-Matchers
+// bleibt; so ist eine Luecke konstruktiv nicht moeglich.
+func TestAuthScrub_UnconditionalInsideRoute(t *testing.T) {
+	assertRouteScrub := func(t *testing.T, block string) {
+		t.Helper()
+		route := strings.Index(block, "route {")
+		if route < 0 {
+			t.Fatalf("kein route-Block, Reihenfolge waere dann Caddys eigene:\n%s", block)
+		}
+		fa := strings.Index(block, "forward_auth")
+		if fa < 0 {
+			t.Fatalf("kein forward_auth:\n%s", block)
 		}
 		for _, h := range []string{"Remote-User", "Remote-Email", "Remote-Groups"} {
-			if !strings.Contains(block, "request_header @auth-scrub -"+h) {
-				t.Errorf("expected %s to be scrubbed, got:\n%s", h, block)
+			pos := strings.Index(block, "request_header -"+h)
+			switch {
+			case pos < 0:
+				t.Errorf("%s wird nicht entfernt:\n%s", h, block)
+			case pos < route:
+				t.Errorf("%s wird ausserhalb des route-Blocks entfernt:\n%s", h, block)
+			case pos > fa:
+				t.Errorf("%s wird erst NACH forward_auth entfernt - das wuerde die Identitaet wieder loeschen:\n%s", h, block)
 			}
 		}
-	})
+		// Kein Matcher am Scrub: genau das war die fehleranfaellige Variante.
+		if strings.Contains(block, "@auth-scrub") {
+			t.Errorf("Scrub haengt an einem Matcher statt bedingungslos zu laufen:\n%s", block)
+		}
+	}
 
-	t.Run("except mode scrubs the excepted paths", func(t *testing.T) {
-		block := generateAuthBlock("", nil, []string{"/health"}, nil)
-		if !strings.Contains(block, "@auth-scrub path /health") {
-			t.Errorf("expected scrub on excepted paths, got:\n%s", block)
+	t.Run("paths mode", func(t *testing.T) {
+		assertRouteScrub(t, generateAuthBlock("", []string{"/admin/*"}, nil, nil))
+	})
+	t.Run("except mode", func(t *testing.T) {
+		assertRouteScrub(t, generateAuthBlock("", nil, []string{"/health"}, nil))
+	})
+	t.Run("paths mode mit Gruppen", func(t *testing.T) {
+		block := generateAuthBlock("", []string{"/admin/*"}, nil, []string{"admins"})
+		assertRouteScrub(t, block)
+		if !strings.Contains(block, "error @auth-groups-denied 403") {
+			t.Errorf("Gruppen-Pruefung ohne error-Direktive - sie wuerde nichts ablehnen:\n%s", block)
 		}
 	})
 
-	t.Run("full site auth needs no scrub", func(t *testing.T) {
+	// Full-Site-Auth braucht keinen Scrub: forward_auth deckt jeden Pfad ab und
+	// copy_headers loescht die Header ohnehin erst und setzt sie dann neu.
+	t.Run("full site braucht keinen Scrub", func(t *testing.T) {
 		block := generateAuthBlock("", nil, nil, nil)
-		if strings.Contains(block, "auth-scrub") {
-			t.Errorf("full-site auth must not scrub, got:\n%s", block)
+		if strings.Contains(block, "request_header -Remote-User") {
+			t.Errorf("unnoetiger Scrub bei Full-Site-Auth:\n%s", block)
+		}
+	})
+
+	// Die error-Direktive darf beim Full-Site-Fall nicht verloren gehen - ohne
+	// sie ist der Gruppen-Matcher wirkungslos und JEDE Gruppe kaeme durch.
+	t.Run("full site mit Gruppen lehnt weiterhin ab", func(t *testing.T) {
+		block := generateAuthBlock("", nil, nil, []string{"admins"})
+		if !strings.Contains(block, "@auth-groups-denied") {
+			t.Errorf("Gruppen-Matcher fehlt:\n%s", block)
+		}
+		if !strings.Contains(block, "error @auth-groups-denied 403") {
+			t.Errorf("Gruppen-Pruefung ohne error-Direktive - sie wuerde nichts ablehnen:\n%s", block)
 		}
 	})
 }
@@ -972,8 +1054,11 @@ func TestWriteConfig_AuthScrubReachesGeneratedFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(content), "request_header @auth-scrub -Remote-User") {
+			if !strings.Contains(string(content), "request_header -Remote-User") {
 				t.Errorf("scrub missing from generated %s config:\n%s", typ, content)
+			}
+			if !strings.Contains(string(content), "route {") {
+				t.Errorf("scrub not inside a route block in %s config:\n%s", typ, content)
 			}
 		})
 	}
