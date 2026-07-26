@@ -224,6 +224,19 @@ const statusHTML = `<!DOCTYPE html>
             check: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
         };
 
+        // Alle angezeigten Werte stammen aus Container-ENV bzw. aus manuell
+        // gepflegten .conf-Dateien. Ohne Escaping fuehrt ein Container mit
+        // CADDY_ALLOWLIST='<img src=x onerror=...>' Code im Browser des Admins
+        // aus, der dieses Dashboard oeffnet.
+        function esc(value) {
+            return String(value === null || value === undefined ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function copyToClipboard(text, btn) {
             navigator.clipboard.writeText(text).then(() => {
                 const original = btn.innerHTML;
@@ -288,12 +301,22 @@ const statusHTML = `<!DOCTYPE html>
             });
         }
 
+        // Kopier-Buttons tragen den Wert als data-Attribut statt als Inline-
+        // onclick-Handler: ein "'" im Wert wuerde den Handler sonst verlassen.
+        function copyButton(value) {
+            return '<button type="button" data-copy="' + esc(value) + '" class="copy-btn text-zinc-300 hover:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">' + icons.copy + '</button>';
+        }
+
         function domainLinks(domains) {
             if (!domains || domains.length === 0) return '<span class="text-zinc-400">—</span>';
             return domains.map(d =>
                 '<div class="flex items-center gap-1.5 leading-relaxed group">' +
-                '<a href="https://' + d + '" target="_blank" class="text-zinc-900 hover:text-blue-600 transition-colors">' + d + '</a>' +
-                '<button onclick="copyToClipboard(\'' + d + '\', this)" class="text-zinc-300 hover:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">' + icons.copy + '</button>' +
+                // esc() statt encodeURIComponent: letzteres wuerde ":" kodieren
+                // und damit eine Domain mit Port aus einer manuellen Config
+                // zerstoeren. Das feste "https://"-Praefix schliesst ein
+                // abweichendes Schema ohnehin aus.
+                '<a href="https://' + esc(d) + '" target="_blank" rel="noopener noreferrer" class="text-zinc-900 hover:text-blue-600 transition-colors">' + esc(d) + '</a>' +
+                copyButton(d) +
                 '</div>'
             ).join('');
         }
@@ -307,7 +330,7 @@ const statusHTML = `<!DOCTYPE html>
             const dot = managed
                 ? '<span class="text-emerald-500 mr-1.5" data-tooltip="Managed">' + icons.managed + '</span>'
                 : '<span class="text-zinc-400 mr-1.5" data-tooltip="Manual">' + icons.manual + '</span>';
-            return dot + '<span class="' + (colors[type] || 'text-zinc-600') + ' font-medium">' + type + '</span>';
+            return dot + '<span class="' + (colors[type] || 'text-zinc-600') + ' font-medium">' + esc(type) + '</span>';
         }
 
         function optionIcons(svc) {
@@ -363,7 +386,7 @@ const statusHTML = `<!DOCTYPE html>
             return opts.map(o => {
                 const cls = o.enabled ? 'text-emerald-500' : 'text-zinc-300';
                 const tooltip = o.tooltip + (o.enabled ? ' ✓' : ' ✗');
-                return '<span class="' + cls + '" data-tooltip="' + tooltip + '">' + icons[o.key] + '</span>';
+                return '<span class="' + cls + '" data-tooltip="' + esc(tooltip) + '">' + icons[o.key] + '</span>';
             }).join('');
         }
 
@@ -371,8 +394,13 @@ const statusHTML = `<!DOCTYPE html>
             if (!codeEditorUrl || !svc.configPath) {
                 return '<span class="text-zinc-300">—</span>';
             }
+            // Nur http(s) verlinken: ein versehentlich gesetztes
+            // CODE_EDITOR_URL=javascript:... waere sonst per Klick ausfuehrbar.
+            if (!/^https?:\/\//i.test(codeEditorUrl)) {
+                return '<span class="text-zinc-300">—</span>';
+            }
             const folder = svc.configPath.substring(0, svc.configPath.lastIndexOf('/'));
-            return '<a href="' + codeEditorUrl + folder + '" target="_blank" class="text-zinc-400 hover:text-zinc-600 transition-colors" data-tooltip-right="Open in editor">' + icons.external + '</a>';
+            return '<a href="' + esc(codeEditorUrl + folder) + '" target="_blank" rel="noopener noreferrer" class="text-zinc-400 hover:text-zinc-600 transition-colors" data-tooltip-right="Open in editor">' + icons.external + '</a>';
         }
 
         function getFirstDomain(svc) {
@@ -454,7 +482,7 @@ const statusHTML = `<!DOCTYPE html>
                     <tr class="hover:bg-zinc-50/50 transition-colors">
                         <td class="px-4 py-3 font-mono text-sm">${domainLinks(svc.domains)}</td>
                         <td class="px-4 py-3 text-sm"><div class="flex items-center">${typeLabel(svc.type, svc.managed)}</div></td>
-                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).map(a => '<div class="flex items-center gap-1.5 leading-relaxed group"><span>' + a + '</span><button onclick="copyToClipboard(\'' + a + '\', this)" class="text-zinc-300 hover:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">' + icons.copy + '</button></div>').join('') || '<span class="text-zinc-300">—</span>'}</td>
+                        <td class="px-4 py-3 font-mono text-sm text-zinc-500">${(svc.allowlist || []).map(a => '<div class="flex items-center gap-1.5 leading-relaxed group"><span>' + esc(a) + '</span>' + copyButton(a) + '</div>').join('') || '<span class="text-zinc-300">—</span>'}</td>
                         <td class="px-4 py-3"><div class="flex items-center gap-1">${optionIcons(svc)}</div></td>
                         ${showConfig ? '<td class="config-cell px-4 py-3 text-center">' + configLink(svc) + '</td>' : ''}
                     </tr>
@@ -482,7 +510,7 @@ const statusHTML = `<!DOCTYPE html>
             }
             container.classList.remove('hidden');
             list.innerHTML = domains.map(d =>
-                '<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-mono bg-amber-50 text-amber-700 border border-amber-200">*.' + d + '</span>'
+                '<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-mono bg-amber-50 text-amber-700 border border-amber-200">*.' + esc(d) + '</span>'
             ).join('');
         }
 
@@ -535,6 +563,12 @@ const statusHTML = `<!DOCTYPE html>
         document.getElementById('search').addEventListener('input', (e) => {
             searchQuery = e.target.value;
             renderServices();
+        });
+
+        // Delegiert, weil die Buttons bei jedem Render neu erzeugt werden.
+        document.getElementById('services').addEventListener('click', (e) => {
+            const btn = e.target.closest('.copy-btn');
+            if (btn) copyToClipboard(btn.dataset.copy, btn);
         });
 
         // Options dropdown
