@@ -777,10 +777,9 @@ func TestWriteConfig_AllowlistWithAuthURL(t *testing.T) {
 		t.Error("expected custom auth URL in forward_auth")
 	}
 
-	// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
-	// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
-	if strings.Contains(contentStr, "header_up Host") {
-		t.Error("unexpected redundant header_up Host")
+	// Sicherheitsrelevant, siehe Kommentar in generateAuthBlock.
+	if !strings.Contains(contentStr, "header_up Host {http.reverse_proxy.upstream.hostport}") {
+		t.Error("header_up Host missing - forward_auth subrequest could carry the client Host")
 	}
 
 	// Should be inside handle block
@@ -1375,10 +1374,12 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth https://login.example.com") {
 			t.Error("expected custom auth URL")
 		}
-		// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
-		// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
-		if strings.Contains(result, "header_up Host") {
-			t.Error("unexpected redundant header_up Host")
+		// Sicherheitsrelevant, siehe Kommentar in generateAuthBlock: ohne
+		// diese Zeile truege die Unteranfrage den Client-Host, was auf der
+		// Gegenseite zu "200, 0 Bytes" und damit zu einem Auth-Bypass fuehren
+		// kann. Caddys "Unnecessary"-Warnung ist hier bewusst in Kauf genommen.
+		if !strings.Contains(result, "header_up Host {http.reverse_proxy.upstream.hostport}") {
+			t.Error("header_up Host missing - forward_auth subrequest could carry the client Host")
 		}
 		if strings.Contains(result, "tinyauth") {
 			t.Error("unexpected tinyauth reference with custom URL")
@@ -1395,10 +1396,12 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
 			t.Error("expected custom auth URL with path matcher")
 		}
-		// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
-		// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
-		if strings.Contains(result, "header_up Host") {
-			t.Error("unexpected redundant header_up Host")
+		// Sicherheitsrelevant, siehe Kommentar in generateAuthBlock: ohne
+		// diese Zeile truege die Unteranfrage den Client-Host, was auf der
+		// Gegenseite zu "200, 0 Bytes" und damit zu einem Auth-Bypass fuehren
+		// kann. Caddys "Unnecessary"-Warnung ist hier bewusst in Kauf genommen.
+		if !strings.Contains(result, "header_up Host {http.reverse_proxy.upstream.hostport}") {
+			t.Error("header_up Host missing - forward_auth subrequest could carry the client Host")
 		}
 	})
 
@@ -1435,10 +1438,12 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
 			t.Error("expected custom auth URL with except matcher")
 		}
-		// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
-		// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
-		if strings.Contains(result, "header_up Host") {
-			t.Error("unexpected redundant header_up Host")
+		// Sicherheitsrelevant, siehe Kommentar in generateAuthBlock: ohne
+		// diese Zeile truege die Unteranfrage den Client-Host, was auf der
+		// Gegenseite zu "200, 0 Bytes" und damit zu einem Auth-Bypass fuehren
+		// kann. Caddys "Unnecessary"-Warnung ist hier bewusst in Kauf genommen.
+		if !strings.Contains(result, "header_up Host {http.reverse_proxy.upstream.hostport}") {
+			t.Error("header_up Host missing - forward_auth subrequest could carry the client Host")
 		}
 	})
 
