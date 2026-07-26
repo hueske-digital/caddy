@@ -829,6 +829,30 @@ func TestSSOCookieStripScope(t *testing.T) {
 	})
 }
 
+// TestExpandDirectoryPaths: Caddys path-Matcher trifft mit "/admin/*" NICHT
+// /admin selbst - mit Caddy 2.11.4 gemessen, dort war /admin ohne jede
+// Authentifizierung erreichbar. Die Wurzel wird deshalb ergaenzt.
+func TestExpandDirectoryPaths(t *testing.T) {
+	got := strings.Join(expandDirectoryPaths([]string{"/admin/*", "/api/v1/*", "/einzeln", "/admin/*"}), " ")
+	want := "/admin/* /admin /api/v1/* /api/v1 /einzeln"
+	if got != want {
+		t.Errorf("expandDirectoryPaths = %q, want %q", got, want)
+	}
+}
+
+// TestAuthExceptIsNotExpanded: bei AUTH_EXCEPT wuerde dieselbe Ergaenzung den
+// Schutz AUFHEBEN statt ihn auszuweiten - /health waere dann ebenfalls von der
+// Auth ausgenommen. Die Liste muss dort exakt bleiben.
+func TestAuthExceptIsNotExpanded(t *testing.T) {
+	block := generateAuthBlock("", nil, []string{"/health/*"}, nil)
+	if !strings.Contains(block, "not path /health/*") {
+		t.Fatalf("except-Matcher fehlt:\n%s", block)
+	}
+	if strings.Contains(block, "not path /health/* /health") {
+		t.Errorf("except-Liste wurde erweitert - das wuerde /health ungeschuetzt lassen:\n%s", block)
+	}
+}
+
 // TestWriteConfig_SkipsUnchangedContent: der periodische Reconcile laeuft alle
 // fuenf Minuten ueber alle Netzwerke. Wuerde WriteConfig dabei jedes Mal
 // schreiben, loeste das ueber inotify einen Caddy-Reload aller Sites aus.
@@ -1008,13 +1032,14 @@ func TestAuthScrub_UnconditionalInsideRoute(t *testing.T) {
 		}
 	})
 
-	// Full-Site-Auth braucht keinen Scrub: forward_auth deckt jeden Pfad ab und
-	// copy_headers loescht die Header ohnehin erst und setzt sie dann neu.
-	t.Run("full site braucht keinen Scrub", func(t *testing.T) {
-		block := generateAuthBlock("", nil, nil, nil)
-		if strings.Contains(block, "request_header -Remote-User") {
-			t.Errorf("unnoetiger Scrub bei Full-Site-Auth:\n%s", block)
-		}
+	// Full-Site-Auth braucht den Scrub ebenfalls. copy_headers loescht die
+	// Header zwar erst und setzt sie dann - aber liefert der Auth-Dienst 2xx
+	// OHNE einen davon, blieb in Caddy 2.10.0-2.11.1 der Client-Wert stehen
+	// (GHSA-7r4p-vjf4-gxv4, behoben in 2.11.2). build/Dockerfile pinnt den
+	// gleitenden Tag caddy:2.11-alpine; die Zusicherung darf nicht daran
+	// haengen, welche Patch-Version dort steht.
+	t.Run("full site scrubbt ebenfalls", func(t *testing.T) {
+		assertRouteScrub(t, generateAuthBlock("", nil, nil, nil))
 	})
 
 	// Die error-Direktive darf beim Full-Site-Fall nicht verloren gehen - ohne

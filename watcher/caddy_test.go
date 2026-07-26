@@ -1289,7 +1289,7 @@ func TestWriteConfig_AuthWithPaths(t *testing.T) {
 		t.Error("unexpected import auth when AuthPaths is set")
 	}
 	// Should have path-based auth
-	if !strings.Contains(contentStr, "@auth-paths path /admin/* /dashboard/*") {
+	if !strings.Contains(contentStr, "@auth-paths path /admin/* /admin /dashboard/* /dashboard") {
 		t.Error("expected @auth-paths matcher")
 	}
 	if !strings.Contains(contentStr, "forward_auth @auth-paths") {
@@ -1346,7 +1346,7 @@ func TestGenerateAuthBlock(t *testing.T) {
 		paths := []string{"/admin/*", "/api/private/*"}
 		result := generateAuthBlock("", paths, nil, nil)
 
-		if !strings.Contains(result, "@auth-paths path /admin/* /api/private/*") {
+		if !strings.Contains(result, "@auth-paths path /admin/* /admin /api/private/* /api/private") {
 			t.Error("expected path matcher with all paths")
 		}
 		if !strings.Contains(result, "forward_auth @auth-paths") {
@@ -1702,7 +1702,7 @@ func TestGenerateAuthBlock_WithGroups(t *testing.T) {
 			t.Error("SECURITY: expected @auth-groups-denied matcher for group restriction")
 		}
 		// Must have correct regex
-		if !strings.Contains(result, "(^|,)(admin)(,|$)") {
+		if !strings.Contains(result, "(^|,)[[:blank:]]*(admin)[[:blank:]]*(,|$)") {
 			t.Error("SECURITY: expected correct regex for group matching")
 		}
 		// Must have error 403 for denied groups
@@ -1720,7 +1720,7 @@ func TestGenerateAuthBlock_WithGroups(t *testing.T) {
 		result := generateAuthBlock("", nil, nil, groups)
 
 		// Must have regex with all groups
-		if !strings.Contains(result, "(^|,)(admin|moderator|staff)(,|$)") {
+		if !strings.Contains(result, "(^|,)[[:blank:]]*(admin|moderator|staff)[[:blank:]]*(,|$)") {
 			t.Error("SECURITY: expected regex with all allowed groups")
 		}
 	})
@@ -1731,11 +1731,11 @@ func TestGenerateAuthBlock_WithGroups(t *testing.T) {
 		result := generateAuthBlock("", paths, nil, groups)
 
 		// Must have path-based auth matcher
-		if !strings.Contains(result, "@auth-paths path /admin/* /dashboard/*") {
+		if !strings.Contains(result, "@auth-paths path /admin/* /admin /dashboard/* /dashboard") {
 			t.Error("expected path matcher")
 		}
 		// Must have path restriction in group denial matcher
-		if !strings.Contains(result, "path /admin/* /dashboard/*") {
+		if !strings.Contains(result, "path /admin/* /admin /dashboard/* /dashboard") {
 			t.Error("SECURITY: group denial must be restricted to auth paths")
 		}
 		// Must have group denial
@@ -1822,7 +1822,7 @@ func TestWriteConfig_AuthWithGroups_Internal(t *testing.T) {
 	if !strings.Contains(contentStr, "@auth-groups-denied") {
 		t.Error("SECURITY: expected @auth-groups-denied matcher")
 	}
-	if !strings.Contains(contentStr, "(^|,)(admin|developers)(,|$)") {
+	if !strings.Contains(contentStr, "(^|,)[[:blank:]]*(admin|developers)[[:blank:]]*(,|$)") {
 		t.Error("SECURITY: expected correct group regex")
 	}
 	if !strings.Contains(contentStr, "error @auth-groups-denied 403") {
@@ -2018,36 +2018,57 @@ func TestWriteConfig_AuthWithGroupsAndExcept(t *testing.T) {
 }
 
 // Test that the regex correctly handles edge cases
+// TestAuthGroupsRegex prueft das VERHALTEN des erzeugten Regex, nicht seinen
+// Wortlaut. Ein Vergleich auf die Zeichenkette haette die Toleranz fuer
+// "users, admins" nicht bemerkt - und auch nicht, ob Teilstring-Treffer
+// weiterhin ausgeschlossen sind.
 func TestAuthGroupsRegex(t *testing.T) {
-	testCases := []struct {
-		name     string
-		groups   []string
-		expected string
-	}{
-		{
-			name:     "single group",
-			groups:   []string{"admin"},
-			expected: "(^|,)(admin)(,|$)",
-		},
-		{
-			name:     "two groups",
-			groups:   []string{"admin", "users"},
-			expected: "(^|,)(admin|users)(,|$)",
-		},
-		{
-			name:     "multiple groups",
-			groups:   []string{"admin", "moderator", "users", "guests"},
-			expected: "(^|,)(admin|moderator|users|guests)(,|$)",
-		},
+	// Holt den Regex aus dem erzeugten Block, damit der Test nicht die
+	// Konstruktion nachbaut.
+	extract := func(t *testing.T, groups []string) *regexp.Regexp {
+		t.Helper()
+		block := generateAuthBlock("", nil, nil, groups)
+		m := regexp.MustCompile(`(?m)^\s*not header_regexp Remote-Groups (.+)$`).FindStringSubmatch(block)
+		if m == nil {
+			t.Fatalf("kein header_regexp im Block:\n%s", block)
+		}
+		re, err := regexp.Compile(m[1])
+		if err != nil {
+			t.Fatalf("erzeugter Regex ist ungueltig (%v): %s", err, m[1])
+		}
+		return re
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := generateAuthBlock("", nil, nil, tc.groups)
-			if !strings.Contains(result, tc.expected) {
-				t.Errorf("expected regex %s in result", tc.expected)
-			}
-		})
+	cases := []struct {
+		groups []string
+		value  string
+		match  bool
+		why    string
+	}{
+		{[]string{"admin"}, "admin", true, "genau die Gruppe"},
+		{[]string{"admin"}, "users,admin", true, "in einer Liste ohne Leerzeichen"},
+		{[]string{"admin"}, "users, admin", true, "in einer Liste MIT Leerzeichen - so kommen Listen in der Praxis"},
+		{[]string{"admin"}, "admin, users", true, "am Anfang einer Liste mit Leerzeichen"},
+		{[]string{"admin"}, "a, admin , b", true, "Leerzeichen auf beiden Seiten"},
+		{[]string{"admin"}, "administrators", false, "kein Teilstring-Treffer"},
+		{[]string{"admin"}, "superadmin", false, "kein Suffix-Treffer"},
+		{[]string{"admin"}, "adminx", false, "kein Praefix-Treffer"},
+		{[]string{"admin"}, "users,administrators", false, "kein Teilstring in einer Liste"},
+		{[]string{"admin"}, "", false, "leerer Header erfuellt nichts"},
+		{[]string{"admin"}, "Admin", false, "Gross-/Kleinschreibung zaehlt - fail-closed"},
+		{[]string{"admin", "ops"}, "x,ops", true, "zweite Gruppe der Liste"},
+		{[]string{"admin", "ops"}, "opsx", false, "kein Teilstring der zweiten Gruppe"},
+		// Regex-Metazeichen im Gruppennamen duerfen nicht als Muster wirken.
+		{[]string{"a.b"}, "a.b", true, "Punkt als Literal"},
+		{[]string{"a.b"}, "axb", false, "Punkt darf kein Platzhalter sein"},
+	}
+
+	for _, c := range cases {
+		re := extract(t, c.groups)
+		if got := re.MatchString(c.value); got != c.match {
+			t.Errorf("Gruppen %v, Header %q: match=%v, erwartet %v (%s) - Regex: %s",
+				c.groups, c.value, got, c.match, c.why, re)
+		}
 	}
 }
 

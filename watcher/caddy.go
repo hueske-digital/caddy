@@ -305,16 +305,11 @@ func (m *CaddyManager) generateReverseProxyBlock(cfg *CaddyConfig, indent string
 // generateAuthBlockForHandle generates auth block for inside handle blocks (internal/cloudflare types)
 // Uses 8-space indentation instead of 4-space for imports
 func (m *CaddyManager) generateAuthBlockForHandle(cfg *CaddyConfig) string {
-	// Generate the base auth block (4-space indentation)
-	var baseBlock string
-	if cfg.AuthURL != "" {
-		baseBlock = generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups)
-	} else if len(cfg.AuthPaths) == 0 && len(cfg.AuthExcept) == 0 && len(cfg.AuthGroups) == 0 {
-		// Simple full-site auth - generate inline with correct indentation
-		return "        forward_auth {env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000 {\n            uri /api/auth/caddy\n            copy_headers Remote-User Remote-Email Remote-Groups\n        }"
-	} else {
-		baseBlock = generateAuthBlock("", cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups)
-	}
+	// Ein einziger Weg fuer alle Faelle. Der frueher hier stehende Sonderfall
+	// fuer Full-Site-Auth erzeugte den Block inline und umging damit den Scrub
+	// aus generateAuthBlock - genau die Art Ausnahme, die eine Zusicherung
+	// stillschweigend aushebelt.
+	baseBlock := generateAuthBlock(cfg.AuthURL, cfg.AuthPaths, cfg.AuthExcept, cfg.AuthGroups)
 
 	// Add 4 more spaces to each line (convert 4-space to 8-space indentation)
 	lines := strings.Split(baseBlock, "\n")
@@ -645,7 +640,12 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		for i, g := range groups {
 			quoted[i] = regexp.QuoteMeta(g)
 		}
-		groupsRegex := fmt.Sprintf("(^|,)(%s)(,|$)", strings.Join(quoted, "|"))
+		// [[:blank:]]* um die Gruppe: Listen kommen in der Praxis als
+		// "users, admins" mit Leerzeichen nach dem Komma. Ohne die Toleranz
+		// bekaeme ein berechtigter Nutzer faelschlich 403. Die Wortgrenzen
+		// bleiben Komma bzw. Anfang/Ende, ein Teilstring-Treffer ist also
+		// weiterhin ausgeschlossen.
+		groupsRegex := fmt.Sprintf("(^|,)[[:blank:]]*(%s)[[:blank:]]*(,|$)", strings.Join(quoted, "|"))
 		// Die Matcher-Definition bleibt auf Site-Ebene, die error-Direktive
 		// wandert in den route-Block - dort entscheidet die Reihenfolge.
 		groupsBlock = fmt.Sprintf(`
@@ -655,18 +655,30 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	}
 
 	// Full site auth (no paths, no except)
+	//
+	// Auch hier der Scrub, obwohl forward_auth jeden Pfad abdeckt: liefert der
+	// Auth-Dienst 2xx OHNE einen der kopierten Header, blieb in Caddy
+	// 2.10.0-2.11.1 der vom Client gesetzte Wert stehen und erreichte das
+	// Backend (GHSA-7r4p-vjf4-gxv4, behoben in 2.11.2). build/Dockerfile pinnt
+	// den gleitenden Tag caddy:2.11-alpine - die Zusicherung soll nicht davon
+	// abhaengen, welche Patch-Version dort gerade steht.
 	if len(paths) == 0 && len(except) == 0 {
-		result := fmt.Sprintf(`    forward_auth %s {
+		forwardAuth := fmt.Sprintf(`forward_auth %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
     }`, authServer, headerUp)
+
+		matchers := ""
+		groupsError := ""
 		if len(groups) > 0 {
-			// No path restriction for groups check. Die error-Direktive gehoert
-			// hier direkt hinter den Matcher - ohne route-Block entscheidet
-			// Caddys eigene Reihenfolge, und die passt fuer error/forward_auth.
-			result += fmt.Sprintf(groupsBlock, "") + "\n    error @auth-groups-denied 403"
+			matchers = strings.TrimPrefix(fmt.Sprintf(groupsBlock, ""), "\n")
+			groupsError = "    error @auth-groups-denied 403"
 		}
-		return result
+		route := wrapAuthInRoute("    "+forwardAuth, groupsError)
+		if matchers == "" {
+			return route
+		}
+		return matchers + "\n" + route
 	}
 
 	// Auth with except paths (protect all EXCEPT these)
@@ -688,7 +700,7 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	}
 
 	// Path-based auth (protect only these paths)
-	pathList := strings.Join(paths, " ")
+	pathList := strings.Join(expandDirectoryPaths(paths), " ")
 	forwardAuth := fmt.Sprintf(`forward_auth @auth-paths %s {
         uri /api/auth/caddy
         copy_headers Remote-User Remote-Email Remote-Groups%s
@@ -702,6 +714,35 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		groupsError = "    error @auth-groups-denied 403"
 	}
 	return matchers + "\n" + wrapAuthInRoute("    "+forwardAuth, groupsError)
+}
+
+// expandDirectoryPaths ergaenzt zu jedem Pfad, der auf "/*" endet, denselben
+// Pfad ohne dieses Suffix.
+//
+// Caddys path-Matcher trifft mit "/admin/*" die Pfade /admin/ und /admin/x, aber
+// NICHT /admin selbst - mit Caddy 2.11.4 gemessen: dort lieferte /admin die
+// geschuetzte Seite ohne jede Authentifizierung. Wer CADDY_AUTH_PATHS=/admin/*
+// setzt, meint aber den Adminbereich einschliesslich seiner Wurzel.
+//
+// Ausdruecklich NUR fuer AUTH_PATHS. Bei AUTH_EXCEPT wuerde dieselbe Ergaenzung
+// den Schutz aufheben statt ihn auszuweiten - dort bleibt die Liste exakt so,
+// wie sie angegeben wurde.
+func expandDirectoryPaths(paths []string) []string {
+	seen := make(map[string]bool, len(paths)*2)
+	var out []string
+	add := func(p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, p := range paths {
+		add(p)
+		if strings.HasSuffix(p, "/*") {
+			add(strings.TrimSuffix(p, "/*"))
+		}
+	}
+	return out
 }
 
 // wrapAuthInRoute setzt einen bedingungslosen Scrub der Identitaets-Header vor

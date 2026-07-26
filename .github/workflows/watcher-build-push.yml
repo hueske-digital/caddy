@@ -58,9 +58,16 @@ jobs:
       # bewusst: schlaegt er fehl, ist entweder der Fix verloren gegangen oder
       # Caddy hat sein Host-Verhalten geaendert - beides muss auffallen, bevor
       # ein Image entsteht.
-      - name: forward_auth bypass guard
+      - name: Auth chain guard
         working-directory: ./watcher
         run: bash test/auth-guard.sh
+
+      # Prueft die uebrigen Sicherheitsfunktionen an echten Konfigurationen:
+      # SSO-Cookie-Strip, blockierte sensible Dateien, Sicherheits-Header,
+      # WordPress-Regeln, stealth beim cloudflare-Typ.
+      - name: Security features guard
+        working-directory: ./watcher
+        run: bash test/security-features.sh
 
       # Meldet, blockiert aber nicht: die aktuell erreichbaren Funde stecken in
       # github.com/docker/docker und sind dort mit "Fixed in: N/A" gelistet - es
