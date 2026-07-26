@@ -20,6 +20,10 @@
 #   S6  (stealth): beim cloudflare-Typ wird eine Anfrage, die nicht aus dem
 #       Cloudflare-Netz kommt, mit 404 abgewiesen statt die Existenz zu verraten
 #   S7  Allowlist: dokumentiert, dass private_ranges immer mitgilt
+#   S8  Forwarded-Header: vom Client gesetzte X-Forwarded-* und X-Real-IP
+#       erreichen das Backend nicht - auch dann nicht, wenn
+#       CADDY_TRUSTED_PROXIES gesetzt ist und der Client aus einem privaten
+#       Netz kommt. TinyAuth stuetzt seine IP-Regeln auf X-Forwarded-For.
 
 set -uo pipefail
 
@@ -107,6 +111,13 @@ func TestZZSecFeatGen(t *testing.T) {
 		Container: "allow", OwnerContainer: "allow", Type: TypeExternal,
 		Domains: []string{"allow.example.com"}, Header: true,
 		Allowlist: []string{"203.0.113.7"},
+	})
+	// CADDY_TRUSTED_PROXIES mit einer fremden IP: der Testclient kommt aus
+	// einem privaten Netz und darf trotzdem nichts vortaeuschen.
+	write(&CaddyConfig{
+		Container: "fwd", OwnerContainer: "fwd", Type: TypeExternal,
+		Domains: []string{"fwd.example.com"}, Header: true,
+		TrustedProxies: []string{"203.0.113.9"},
 	})
 }
 GOEOF
@@ -257,6 +268,49 @@ if [ "$c" = "200" ]; then
 else
     bad "S7 unerwartet: $c - hat sich das Allowlist-Verhalten geaendert?"
 fi
+
+# ── S8 Forwarded-Header ──────────────────────────────────────────────────────
+echo; echo "── S8 gefaelschte Forwarded-Header erreichen das Backend nicht"
+forwarded_check() { # forwarded_check <host> <label>
+    local h="$1" label="$2" json
+    json="$(get "$h" /x \
+        -H 'X-Forwarded-For: 1.2.3.4' \
+        -H 'X-Forwarded-Host: evil.example.com' \
+        -H 'X-Forwarded-Proto: http' \
+        -H 'X-Real-IP: 9.9.9.9')"
+    local vals
+    vals="$(printf '%s' "$json" | python3 -c "
+import json,sys
+try: h=json.load(sys.stdin).get('headers',{})
+except Exception: print('PARSE-FEHLER'); sys.exit()
+print('|'.join(h.get(k,'') for k in ('x-forwarded-for','x-forwarded-host','x-forwarded-proto','x-real-ip')))
+" 2>/dev/null)"
+    echo "     $label: $vals"
+    case "$vals" in
+        PARSE-FEHLER|"") bad "S8 $label keine verwertbare Antwort" ; return ;;
+    esac
+    case "$vals" in
+        *1.2.3.4*) bad "S8 $label gefaelschtes X-Forwarded-For erreicht das Backend" ;;
+        *) ok "S8 $label X-Forwarded-For bereinigt" ;;
+    esac
+    case "$vals" in
+        *evil.example.com*) bad "S8 $label gefaelschtes X-Forwarded-Host erreicht das Backend" ;;
+        *) ok "S8 $label X-Forwarded-Host bereinigt" ;;
+    esac
+    case "$vals" in
+        *"|http|"*) bad "S8 $label gefaelschtes X-Forwarded-Proto erreicht das Backend" ;;
+        *) ok "S8 $label X-Forwarded-Proto bereinigt" ;;
+    esac
+    case "$vals" in
+        *9.9.9.9*) bad "S8 $label gefaelschtes X-Real-IP erreicht das Backend" ;;
+        *) ok "S8 $label X-Real-IP bereinigt" ;;
+    esac
+}
+forwarded_check regular.example.com "ohne CADDY_TRUSTED_PROXIES"
+# Mit gesetztem CADDY_TRUSTED_PROXIES darf ein Client aus einem privaten Netz
+# nicht als vertrauenswuerdiger Proxy gelten - sonst duerfte jeder Container
+# Identitaetsangaben vortaeuschen.
+forwarded_check fwd.example.com "mit CADDY_TRUSTED_PROXIES"
 
 echo
 echo "════════════════════════════════════════════════════════"

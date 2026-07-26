@@ -1493,7 +1493,7 @@ func TestWriteConfig_TrustedProxies_Internal(t *testing.T) {
 	contentStr := string(content)
 
 	// Should have trusted_proxies directive
-	if !strings.Contains(contentStr, "trusted_proxies private_ranges 1.2.3.4 5.6.7.8") {
+	if !strings.Contains(contentStr, "trusted_proxies 1.2.3.4 5.6.7.8") {
 		t.Error("expected trusted_proxies directive with IPs")
 	}
 }
@@ -1529,7 +1529,7 @@ func TestWriteConfig_TrustedProxies_Cloudflare(t *testing.T) {
 	contentStr := string(content)
 
 	// Should have trusted_proxies directive
-	if !strings.Contains(contentStr, "trusted_proxies private_ranges 10.0.0.1") {
+	if !strings.Contains(contentStr, "trusted_proxies 10.0.0.1") {
 		t.Error("expected trusted_proxies directive")
 	}
 	// Should also have header_up for CF
@@ -1569,7 +1569,7 @@ func TestWriteConfig_TrustedProxies_External(t *testing.T) {
 	contentStr := string(content)
 
 	// Should have trusted_proxies directive in block format
-	if !strings.Contains(contentStr, "trusted_proxies private_ranges 192.168.1.1") {
+	if !strings.Contains(contentStr, "trusted_proxies 192.168.1.1") {
 		t.Error("expected trusted_proxies directive")
 	}
 }
@@ -1609,7 +1609,7 @@ func TestWriteConfig_TrustedProxies_ExternalWithAllowlist(t *testing.T) {
 	if !strings.Contains(contentStr, "@allowed") {
 		t.Error("expected @allowed matcher")
 	}
-	if !strings.Contains(contentStr, "trusted_proxies private_ranges 192.168.1.1") {
+	if !strings.Contains(contentStr, "trusted_proxies 192.168.1.1") {
 		t.Error("expected trusted_proxies directive")
 	}
 }
@@ -1653,7 +1653,7 @@ func TestParseImportsFromContent_TrustedProxies(t *testing.T) {
 https://test.example.com {
     import tls
     reverse_proxy myapp:8080 {
-        trusted_proxies private_ranges 1.2.3.4 5.6.7.8
+        trusted_proxies 1.2.3.4 5.6.7.8
     }
 }`
 

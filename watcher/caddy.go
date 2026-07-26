@@ -267,6 +267,23 @@ func isTinyauthHost(cfg *CaddyConfig) bool {
 	return false
 }
 
+// realIPDirective setzt X-Real-IP auf die tatsaechliche Gegenstelle.
+//
+// Caddy verwaltet diesen Header nicht - gemessen: ein vom Client gesetztes
+// "X-Real-IP: 9.9.9.9" erreichte das Backend unveraendert, unabhaengig von
+// trusted_proxies. Backends, Rate-Limits, Geo-Sperren und Audit-Logs, die sich
+// darauf stuetzen, waeren damit frei steuerbar.
+//
+// {client_ip} ist nicht ueber X-Forwarded-For beeinflussbar (mit Caddy 2.11.4
+// geprueft) und beruecksichtigt eine global konfigurierte trusted_proxies-Liste,
+// falls es die einmal gibt.
+//
+// Der cloudflare-Typ setzt den Header separat aus CF-Connecting-IP - dort ist
+// die Gegenstelle Cloudflare, nicht der Besucher.
+func realIPDirective() string {
+	return "header_up X-Real-IP {client_ip}"
+}
+
 // generateReverseProxyBlock generates the reverse_proxy directive with optional trusted_proxies
 // indent is the base indentation (e.g., "        " for 8 spaces)
 // extraDirectives are optional additional directives inside the block (e.g., "header_up X-Real-IP ...")
@@ -295,7 +312,20 @@ func (m *CaddyManager) generateReverseProxyBlock(cfg *CaddyConfig, indent string
 		lines = append(lines, indent+"    "+d)
 	}
 	if len(resolvedProxies) > 0 {
-		lines = append(lines, indent+"    trusted_proxies private_ranges "+strings.Join(resolvedProxies, " "))
+		// Bewusst OHNE private_ranges.
+		//
+		// "trusted_proxies" heisst: von diesen Gegenstellen werden
+		// X-Forwarded-*-Angaben uebernommen statt ersetzt. Mit private_ranges
+		// waere das jeder Container im Docker-Netz - gemessen: ein Client aus
+		// einem privaten Netz konnte damit X-Forwarded-For, -Host und -Proto
+		// frei setzen und die Werte erreichten das Backend unveraendert. Bei
+		// TinyAuth, das seine IP-Regeln auf X-Forwarded-For stuetzt, ist das
+		// der Weg zur Umgehung.
+		//
+		// Vertraut wird nur, was ueber CADDY_TRUSTED_PROXIES ausdruecklich
+		// benannt wurde. Ohne die Variable entsteht die Direktive gar nicht und
+		// Caddy ersetzt die Angaben - die sichere Voreinstellung.
+		lines = append(lines, indent+"    trusted_proxies "+strings.Join(resolvedProxies, " "))
 	}
 	lines = append(lines, indent+"}")
 
@@ -437,7 +467,7 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 
 	// Generate reverse_proxy block for internal and cloudflare types
 	if cfg.Type == TypeInternal {
-		rpBlock := m.generateReverseProxyBlock(cfg, "        ")
+		rpBlock := m.generateReverseProxyBlock(cfg, "        ", realIPDirective())
 		content = strings.ReplaceAll(content, "{{REVERSE_PROXY_BLOCK}}", rpBlock)
 	} else if cfg.Type == TypeCloudflare {
 		rpBlock := m.generateReverseProxyBlock(cfg, "        ", "header_up X-Real-IP {header.CF-Connecting-IP}")
@@ -514,7 +544,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	// importantly, the SSO cookie strip. Building the directive by hand here is
 	// what previously left external backends receiving the TinyAuth cookie.
 	if len(cfg.Allowlist) == 0 {
-		return "\n" + m.generateReverseProxyBlock(cfg, "    ")
+		return "\n" + m.generateReverseProxyBlock(cfg, "    ", realIPDirective())
 	}
 
 	// Get resolved IPs from allowlist manager
@@ -540,7 +570,7 @@ func (m *CaddyManager) generateAllowlistBlock(cfg *CaddyConfig) string {
 	// Same generator as everywhere else, so the SSO cookie strip is not forgotten
 	// here either. The template below already indents the first line by eight
 	// spaces, so only that leading indentation is removed.
-	reverseProxyBlock := strings.TrimLeft(m.generateReverseProxyBlock(cfg, "        "), " ")
+	reverseProxyBlock := strings.TrimLeft(m.generateReverseProxyBlock(cfg, "        ", realIPDirective()), " ")
 
 	// Generate allowlist block (private_ranges always allowed for internal access)
 	// Even if DNS fails, we still restrict to private_ranges - never fall back to open access

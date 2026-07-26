@@ -853,6 +853,78 @@ func TestAuthExceptIsNotExpanded(t *testing.T) {
 	}
 }
 
+// TestTrustedProxiesExcludesPrivateRanges: "trusted_proxies" heisst, dass
+// X-Forwarded-*-Angaben dieser Gegenstellen uebernommen statt ersetzt werden.
+// Mit private_ranges waere das jeder Container im Docker-Netz - gemessen konnte
+// ein Client aus einem privaten Netz damit X-Forwarded-For, -Host und -Proto
+// frei setzen. Bei TinyAuth, das seine IP-Regeln darauf stuetzt, ist das der Weg
+// zur Umgehung.
+func TestTrustedProxiesExcludesPrivateRanges(t *testing.T) {
+	mgr := NewCaddyManager(t.TempDir(), NewAllowlistManager(0, nil))
+	cfg := &CaddyConfig{
+		Network: "n_caddy", Container: "web", OwnerContainer: "web",
+		Type: TypeExternal, Domains: []string{"a.example.com"},
+		Upstream: "web:80", DNSProvider: "http",
+		TrustedProxies: []string{"203.0.113.9"},
+	}
+	block := mgr.generateReverseProxyBlock(cfg, "    ")
+
+	if !strings.Contains(block, "trusted_proxies 203.0.113.9") {
+		t.Errorf("benannter Proxy fehlt:\n%s", block)
+	}
+	if strings.Contains(block, "trusted_proxies private_ranges") {
+		t.Errorf("private_ranges vertraut jedem Container im Netz:\n%s", block)
+	}
+}
+
+// TestRealIPIsSetByProxy: Caddy verwaltet X-Real-IP nicht - ein vom Client
+// gesetzter Wert erreichte das Backend unveraendert. Er wird deshalb selbst
+// gesetzt, aus {client_ip}, das ueber X-Forwarded-For nicht beeinflussbar ist.
+func TestRealIPIsSetByProxy(t *testing.T) {
+	if got := realIPDirective(); got != "header_up X-Real-IP {client_ip}" {
+		t.Errorf("realIPDirective() = %q", got)
+	}
+
+	mgr := NewCaddyManager(t.TempDir(), nil)
+	for _, typ := range []string{TypeExternal, TypeInternal} {
+		dir := t.TempDir()
+		m := NewCaddyManager(dir, nil)
+		cfg := &CaddyConfig{
+			Network: "n_caddy", Container: "web", OwnerContainer: "web",
+			Type: typ, Domains: []string{"a.example.com"},
+			Upstream: "web:80", DNSProvider: "http",
+		}
+		if err := m.WriteConfig(cfg); err != nil {
+			t.Fatal(err)
+		}
+		content, err := os.ReadFile(filepath.Join(dir, typ, "web_n_caddy.conf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), "header_up X-Real-IP {client_ip}") {
+			t.Errorf("%s: X-Real-IP wird nicht gesetzt, ein Client-Wert liefe durch:\n%s", typ, content)
+		}
+	}
+	_ = mgr
+
+	// Der cloudflare-Typ setzt ihn aus CF-Connecting-IP - dort ist die
+	// Gegenstelle Cloudflare, nicht der Besucher.
+	dir := t.TempDir()
+	m := NewCaddyManager(dir, nil)
+	cfg := &CaddyConfig{
+		Network: "n_caddy", Container: "web", OwnerContainer: "web",
+		Type: TypeCloudflare, Domains: []string{"a.example.com"},
+		Upstream: "web:80", DNSProvider: "http",
+	}
+	if err := m.WriteConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	content, _ := os.ReadFile(filepath.Join(dir, TypeCloudflare, "web_n_caddy.conf"))
+	if !strings.Contains(string(content), "X-Real-IP {header.CF-Connecting-IP}") {
+		t.Errorf("cloudflare-Typ setzt X-Real-IP nicht aus CF-Connecting-IP:\n%s", content)
+	}
+}
+
 // TestWriteConfig_SkipsUnchangedContent: der periodische Reconcile laeuft alle
 // fuenf Minuten ueber alle Netzwerke. Wuerde WriteConfig dabei jedes Mal
 // schreiben, loeste das ueber inotify einen Caddy-Reload aller Sites aus.
