@@ -54,6 +54,14 @@ jobs:
         working-directory: ./watcher
         run: go test -race -v ./...
 
+      # Sicherheits-Waechter gegen einen Auth-Bypass in forward_auth. Blockiert
+      # bewusst: schlaegt er fehl, ist entweder der Fix verloren gegangen oder
+      # Caddy hat sein Host-Verhalten geaendert - beides muss auffallen, bevor
+      # ein Image entsteht.
+      - name: forward_auth bypass guard
+        working-directory: ./watcher
+        run: bash test/auth-bypass.sh
+
       # Meldet, blockiert aber nicht: die aktuell erreichbaren Funde stecken in
       # github.com/docker/docker und sind dort mit "Fixed in: N/A" gelistet - es
       # gibt schlicht keine Version, auf die man gehen koennte. Als harter Gate

@@ -537,25 +537,33 @@ https://www.%s {%s
 // If groups is set, only allow users with matching groups (returns 403 otherwise)
 func generateAuthBlock(authURL string, paths []string, except []string, groups []string) string {
 	// Determine auth server
-	//
-	// Kein "header_up Host {http.reverse_proxy.upstream.hostport}" mehr, obwohl
-	// die Dokumentation es fuer externe https-Auth-Server lange verlangte.
-	//
-	// Hintergrund: trug die forward_auth-Unteranfrage den Host des CLIENTS,
-	// passte sie beim Auth-Server zu keinem Site-Block. Caddy antwortet auf
-	// einen nicht zuordenbaren Host an einem TLS-Listener mit "200, 0 Bytes",
-	// forward_auth liest jedes 2xx als "authentifiziert" - Auth-Bypass, ohne
-	// dass der Auth-Dienst je gefragt wurde.
-	//
-	// Caddy hat das mit PR #7454 (v2.11.0) an der Wurzel geloest: bei
-	// TLS-Upstreams setzt reverse_proxy den Host selbst auf die
-	// Upstream-Adresse, damit Host und SNI zusammenpassen. Die Direktive setzt
-	// seither genau diesen Wert nochmal und erzeugt nur noch bei jedem Reload
-	// eine "Unnecessary header_up Host"-Warnung. build/Dockerfile pinnt
-	// caddy:2.11-alpine, ein Stand ohne den Fix ist darueber nicht erreichbar.
 	authServer := "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000"
+	headerUp := ""
+
 	if authURL != "" {
 		authServer = authURL
+		// Bei http:// MUSS der Host explizit auf den Upstream gesetzt werden.
+		//
+		// Sonst traegt die forward_auth-Unteranfrage den Host des CLIENTS. Ist
+		// der Auth-Server selbst ein Caddy, passt sie dort zu keinem
+		// Site-Block, und Caddy antwortet auf einen nicht zuordenbaren Host mit
+		// "200, 0 Bytes". forward_auth liest jedes 2xx als "authentifiziert" -
+		// die geschuetzte Seite wird freigegeben, ohne dass der Auth-Dienst je
+		// gefragt wurde. Mit Caddy 2.11.4 reproduziert.
+		//
+		// Bei https:// ist die Zeile NICHT nötig: PR #7454 (v2.11.0) setzt den
+		// Host bei TLS-Upstreams selbst, damit Host und SNI zusammenpassen.
+		// Dort wuerde sie nur zwei "Unnecessary header_up Host"-Warnungen pro
+		// Reload erzeugen. Der Fix deckt aber ausdruecklich nur TLS ab, deshalb
+		// die Unterscheidung nach Schema.
+		//
+		// Der lokale TinyAuth-Pfad bleibt bewusst ohne: TinyAuth leitet den
+		// Redirect- und Cookie-Namen aus dem Host ab, ein Ueberschreiben wuerde
+		// die Anmeldung brechen. Dort ist es unkritisch, weil TinyAuth kein
+		// Host-basiertes Routing macht und jede Anfrage beantwortet.
+		if strings.HasPrefix(authURL, "http://") {
+			headerUp = "\n        header_up Host {http.reverse_proxy.upstream.hostport}"
+		}
 	}
 
 	// Generate group restriction block if groups are specified
@@ -581,8 +589,8 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	if len(paths) == 0 && len(except) == 0 {
 		result := fmt.Sprintf(`    forward_auth %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups
-    }`, authServer)
+        copy_headers Remote-User Remote-Email Remote-Groups%s
+    }`, authServer, headerUp)
 		if len(groups) > 0 {
 			// No path restriction for groups check
 			groupsBlockFull := fmt.Sprintf(groupsBlock, "")
@@ -597,8 +605,8 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		result := fmt.Sprintf(`    @auth-paths not path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups
-    }`, exceptList, authServer)
+        copy_headers Remote-User Remote-Email Remote-Groups%s
+    }`, exceptList, authServer, headerUp)
 		if len(groups) > 0 {
 			// Add path restriction to groups check
 			pathCondition := fmt.Sprintf("\n        not path %s", exceptList)
@@ -613,8 +621,8 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	result := fmt.Sprintf(`    @auth-paths path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups
-    }`, pathList, authServer)
+        copy_headers Remote-User Remote-Email Remote-Groups%s
+    }`, pathList, authServer, headerUp)
 	if len(groups) > 0 {
 		// Add path restriction to groups check
 		pathCondition := fmt.Sprintf("\n        path %s", pathList)
