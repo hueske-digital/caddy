@@ -1,5 +1,5 @@
 #!/bin/bash
-# Waechter gegen einen Auth-Bypass in forward_auth.
+# Waechter fuer die Auth-Kette: Bypass, Gruppen und Identitaets-Header.
 #
 # Der Angriff: traegt die forward_auth-Unteranfrage den Host des CLIENTS statt
 # den des Auth-Servers, passt sie dort zu keinem Site-Block. Caddy antwortet auf
@@ -63,22 +63,31 @@ func TestZZAuthBypassGen(t *testing.T) {
 	if out == "" {
 		t.Skip()
 	}
-	block := generateAuthBlock(os.Getenv("AUTH_URL"), nil, nil, nil)
+	var paths, groups []string
+	if p := os.Getenv("AUTH_PATHS"); p != "" {
+		paths = []string{p}
+	}
+	if g := os.Getenv("AUTH_GROUPS"); g != "" {
+		groups = []string{g}
+	}
+	block := generateAuthBlock(os.Getenv("AUTH_URL"), paths, nil, groups)
 	if err := os.WriteFile(out, []byte(block+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
 GOEOF
 
-gen_block() { # gen_block <name> <auth-url>
+gen_block() { # gen_block <name> <auth-url> [pfad] [gruppe]
     ( cd "$WATCHER_DIR" \
         && AUTH_BLOCK_OUT="$WORKDIR/$1.block" AUTH_URL="$2" \
+           AUTH_PATHS="${3:-}" AUTH_GROUPS="${4:-}" \
            go test -run TestZZAuthBypassGen . >/dev/null 2>&1 )
     [ -s "$WORKDIR/$1.block" ]
 }
 
-gen_block plain "http://auth.local:9000"  || { bad "Auth-Block (http) nicht erzeugt"; exit 1; }
-gen_block tls   "https://auth.local:9443" || { bad "Auth-Block (https) nicht erzeugt"; exit 1; }
+gen_block plain  "http://auth.local:9000"                          || { bad "Auth-Block (http) nicht erzeugt"; exit 1; }
+gen_block tls    "https://auth.local:9443"                         || { bad "Auth-Block (https) nicht erzeugt"; exit 1; }
+gen_block groups "https://auth.local:9443" "/admin/*" "admins"     || { bad "Auth-Block (Gruppen) nicht erzeugt"; exit 1; }
 rm -f "$GEN_TEST"
 info "Auth-Bloecke aus dem Watcher-Code erzeugt"
 
@@ -88,9 +97,14 @@ info "Auth-Bloecke aus dem Watcher-Code erzeugt"
 # sich neben dem Sicherheitsfall auch pruefen, dass der Auth-Server ueberhaupt
 # erreicht wird - sonst wuerde ein kaputter Aufbau als "sicher" durchgehen.
 auth_logic() {
+    # Der Client steuert ueber X-Allow, ob der Auth-Server zustimmt, und ueber
+    # X-Groups, welche Gruppen er meldet. So laesst sich pruefen, dass der
+    # Gruppen-Check der Auth-ANTWORT folgt und nicht dem, was der Client sendet.
     echo '	@erlaubt header X-Allow yes'
     echo '	handle @erlaubt {'
-    echo '		respond "AUTH-SAGT-JA" 200'
+    echo '		header Remote-User "alice"'
+    echo '		header Remote-Groups {header.X-Groups}'
+    echo '		respond 204'
     echo '	}'
     echo '	handle {'
     echo '		respond "AUTH-SAGT-NEIN" 403'
@@ -117,6 +131,11 @@ auth_logic() {
     cat "$WORKDIR/tls.block"
     echo '	respond "GEHEIMER-INHALT" 200'
     echo '}'
+    # Diese Site gibt zurueck, welche Identitaets-Header beim Backend ankommen.
+    echo 'http://:9003 {'
+    cat "$WORKDIR/groups.block"
+    echo '	respond "USER=[{header.Remote-User}] GROUPS=[{header.Remote-Groups}]" 200'
+    echo '}'
 } > "$WORKDIR/Caddyfile"
 
 info "Caddy starten"
@@ -124,7 +143,7 @@ docker rm -f "$CONTAINER" >/dev/null 2>&1
 docker run -d --name "$CONTAINER" \
     --add-host auth.local:127.0.0.1 \
     -v "$WORKDIR/Caddyfile:/etc/caddy/Caddyfile:ro" \
-    -p 19501:9001 -p 19502:9002 "$CADDY_IMAGE" >/dev/null 2>&1
+    -p 19501:9001 -p 19502:9002 -p 19503:9003 "$CADDY_IMAGE" >/dev/null 2>&1
 sleep 6
 
 if ! docker ps --filter "name=$CONTAINER" --format '{{.ID}}' | grep -q .; then
@@ -185,6 +204,42 @@ scenario() {
 
 scenario 19501 "Auth ueber http:// - Watcher muss den Host explizit setzen"
 scenario 19502 "Auth ueber https:// - Caddy setzt den Host selbst (PR #7454)"
+
+# ── Gruppen und Identitaets-Header ───────────────────────────────────────────
+# Geprueft wird, dass der Gruppen-Check der AUTH-ANTWORT folgt und nicht dem,
+# was der Client schickt - und dass auf Pfaden ohne Auth keine vom Client
+# gesetzten Remote-*-Header ans Backend gelangen.
+ask() { # ask <pfad> <header...>
+    local path="$1"; shift
+    curl -s -w ' [%{http_code}]' -H "Host: app.local" "$@" "http://localhost:19503$path" 2>/dev/null
+}
+
+echo; echo "── Gruppen-Beschraenkung (CADDY_AUTH_GROUPS)"
+res="$(ask /admin/x -H 'X-Allow: yes' -H 'X-Groups: admins')"
+case "$res" in
+    *"GROUPS=[admins]"*"[200]") ok "passende Gruppe wird durchgelassen" ;;
+    *) bad "passende Gruppe abgelehnt: $res" ;;
+esac
+
+res="$(ask /admin/x -H 'X-Allow: yes' -H 'X-Groups: users')"
+case "$res" in
+    *"[403]") ok "fremde Gruppe wird mit 403 abgewiesen" ;;
+    *) bad "fremde Gruppe NICHT abgewiesen: $res" ;;
+esac
+
+echo; echo "── Gruppen sind nicht faelschbar"
+res="$(ask /admin/x -H 'X-Allow: yes' -H 'X-Groups: users' -H 'Remote-Groups: admins')"
+case "$res" in
+    *"[403]") ok "vom Client gesetztes Remote-Groups wird ignoriert" ;;
+    *) bad "GRUPPEN-BYPASS: Client-Header hat entschieden: $res" ;;
+esac
+
+echo; echo "── Pfade ohne Auth: Identitaets-Header werden entfernt"
+res="$(ask /public -H 'Remote-User: angreifer' -H 'Remote-Groups: admins')"
+case "$res" in
+    *"USER=[] GROUPS=[]"*) ok "gefaelschte Remote-*-Header erreichen das Backend nicht" ;;
+    *) bad "HEADER-SPOOFING: Backend sieht Client-Header: $res" ;;
+esac
 
 # ── Zustand der Ursache in Caddy, nur Bericht ────────────────────────────────
 echo; echo "── Ursache in Caddy (nur Bericht, kein Fehler)"

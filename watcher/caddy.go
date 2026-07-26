@@ -151,26 +151,80 @@ const ssoCookiePattern = `^(?:tinyauth-[^=;]*=[^;]*(?:;\s*|$))+|;\s*tinyauth-[^=
 // ssoCookieStripDirective returns a header_up directive that removes TinyAuth's
 // session cookies from the request before it reaches the backend.
 //
-// TinyAuth scopes its cookie to the parent domain so single sign-on works across
-// subdomains. The browser therefore sends it to every site under that domain, and
-// without this the backend would see a credential only TinyAuth needs - a
-// compromised backend could replay it against every other protected service.
+// TinyAuth scopet sein Cookie auf die Parent-Domain, damit Single Sign-on ueber
+// Subdomains funktioniert (Domain=.example.com). Der Browser schickt es damit an
+// jede Site UNTERHALB dieser Domain - und dort hat das Backend eine Kredential
+// vor sich, die nur TinyAuth braucht. Ein kompromittiertes Backend koennte sie
+// gegen jeden anderen geschuetzten Dienst wiederverwenden.
 //
-// This must sit on the reverse_proxy to the BACKEND, not on the site. A site-level
-// request_header would run before forward_auth, because Caddy sorts header ahead of
-// handle - TinyAuth would then be asked to authenticate a request stripped of its
-// own session and would reject every login. header_up only rewrites the request
-// going upstream, so the forward_auth call is untouched by construction.
+// Zwei Faelle bekommen deshalb KEINEN Strip:
 //
-// TinyAuth's own host is exempt: it must still read its session. The cookie names
-// carry a suffix derived from the hostname (tinyauth-session-8b2f3e83, tinyauth-csrf-...),
-// so the prefix is matched instead. The three alternatives cover a cookie appearing
-// first, last, in the middle, or alone, without leaving a stray separator behind.
+//   - TinyAuths eigener Host. Er muss seine Sitzung lesen koennen.
+//   - Sites ausserhalb des Cookie-Scopes. Der Browser sendet das Cookie
+//     ueberhaupt nur an Domains unter dem Scope; auf einer fremden Domain wie
+//     kunde.de kann es nie ankommen. Ein Regex-Replace auf dem Cookie-Header
+//     jeder Anfrage waere dort Aufwand und Angriffsflaeche ohne Gegenwert.
+//
+// Der Strip sitzt am reverse_proxy zum BACKEND, nicht auf der Site. Ein
+// request_header auf Site-Ebene liefe vor forward_auth, weil Caddy header vor
+// handle sortiert - TinyAuth bekaeme eine Anfrage ohne seinen eigenen
+// Sitzungscookie und wuerde jede Anmeldung ablehnen. header_up schreibt nur die
+// Anfrage nach oben um, der forward_auth-Aufruf bleibt unberuehrt.
+//
+// Die Cookie-Namen tragen einen aus dem Hostnamen abgeleiteten Suffix
+// (tinyauth-session-8b2f3e83, tinyauth-csrf-...), deshalb wird das Praefix
+// gematcht.
 func ssoCookieStripDirective(cfg *CaddyConfig) string {
 	if isTinyauthHost(cfg) {
 		return ""
 	}
+	if !inTinyauthCookieScope(cfg, tinyauthCookieDomain()) {
+		return ""
+	}
 	return `header_up Cookie "` + ssoCookiePattern + `" ""`
+}
+
+// tinyauthCookieDomain liefert den Geltungsbereich von TinyAuths Cookies, ohne
+// fuehrenden Punkt. Leer bedeutet "unbekannt".
+//
+// Abgeleitet wird er aus TINYAUTH_DOMAIN durch Weglassen des ersten Labels:
+// auth.example.com -> example.com, passend zu Domain=.example.com. Weicht der
+// Aufbau davon ab, laesst sich der Scope ueber TINYAUTH_COOKIE_DOMAIN direkt
+// setzen.
+//
+// Die naive Ableitung kann den Scope zu WEIT fassen (bei einem zweiteiligen
+// TINYAUTH_DOMAIN oder einem mehrteiligen TLD). Das ist die unschaedliche
+// Richtung: zu weit heisst, es wird ueberfluessig gestrippt. Zu eng waere
+// gefaehrlich - dann bliebe das Cookie auf einer Site stehen, die es erhaelt.
+func tinyauthCookieDomain() string {
+	if explicit := strings.TrimSpace(os.Getenv("TINYAUTH_COOKIE_DOMAIN")); explicit != "" {
+		return strings.ToLower(strings.TrimPrefix(explicit, "."))
+	}
+
+	host := strings.ToLower(strings.TrimSpace(os.Getenv("TINYAUTH_DOMAIN")))
+	if host == "" {
+		return ""
+	}
+	if labels := strings.Split(host, "."); len(labels) > 2 {
+		return strings.Join(labels[1:], ".")
+	}
+	return host
+}
+
+// inTinyauthCookieScope prueft, ob eine Site das TinyAuth-Cookie ueberhaupt
+// erhalten kann. Ist der Scope unbekannt, wird das bejaht - lieber unnoetig
+// strippen als eine Kredential durchlassen.
+func inTinyauthCookieScope(cfg *CaddyConfig, scope string) bool {
+	if scope == "" {
+		return true
+	}
+	for _, d := range cfg.Domains {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if d == scope || strings.HasSuffix(d, "."+scope) {
+			return true
+		}
+	}
+	return false
 }
 
 // isTinyauthHost erkennt TinyAuths eigene Site.
@@ -547,7 +601,7 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		// validateAuthURL laesst inzwischen nur https:// durch, dieser Zweig ist
 		// also nicht mehr erreichbar. Er bleibt als zweite Verteidigungslinie
 		// stehen: wird die Validierung je gelockert, ist der Bypass unten nicht
-		// sofort wieder offen. test/auth-bypass.sh prueft beide Ebenen.
+		// sofort wieder offen. test/auth-guard.sh prueft beide Ebenen.
 		//
 		// Sonst traegt die forward_auth-Unteranfrage den Host des CLIENTS. Ist
 		// der Auth-Server selbst ein Caddy, passt sie dort zu keinem

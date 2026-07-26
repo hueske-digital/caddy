@@ -678,6 +678,94 @@ func TestTinyauthHostKeepsItsOwnCookies(t *testing.T) {
 	})
 }
 
+// TestSSOCookieStripScope: gestrippt wird nur, wo das Cookie ueberhaupt
+// ankommen kann. TinyAuth scopet auf die Parent-Domain (Domain=.example.com),
+// eine fremde Domain sieht das Cookie nie - dort waere der Regex-Replace auf
+// jeder Anfrage Aufwand und Angriffsflaeche ohne Gegenwert.
+func TestSSOCookieStripScope(t *testing.T) {
+	site := func(domains ...string) *CaddyConfig {
+		return &CaddyConfig{
+			Network: "app_caddy", Container: "web", OwnerContainer: "web",
+			Type: TypeExternal, Domains: domains, Upstream: "web:80",
+			DNSProvider: "cloudflare",
+		}
+	}
+
+	t.Run("innerhalb des Scopes wird gestrippt", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
+		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
+
+		for _, d := range []string{"hueske.digital", "kunde.hueske.digital", "a.b.hueske.digital"} {
+			if ssoCookieStripDirective(site(d)) == "" {
+				t.Errorf("%s: erwartet Strip, bekommen keinen", d)
+			}
+		}
+	})
+
+	t.Run("fremde Domain wird nicht gestrippt", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
+		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
+
+		for _, d := range []string{
+			"heimatverein-leteln.de",
+			"www.heimatverein-leteln.de",
+			// Praefix-Kollision: endet auf "hueske.digital", ist aber eine
+			// andere Domain. Der Browser sendet das Cookie dorthin nicht.
+			"nichthueske.digital",
+		} {
+			if got := ssoCookieStripDirective(site(d)); got != "" {
+				t.Errorf("%s: unerwarteter Strip: %s", d, got)
+			}
+		}
+	})
+
+	t.Run("eine Domain im Scope genuegt", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
+		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
+
+		if ssoCookieStripDirective(site("kunde.de", "kunde.hueske.digital")) == "" {
+			t.Error("erwartet Strip, wenn mindestens eine Domain im Scope liegt")
+		}
+	})
+
+	t.Run("unbekannter Scope strippt ueberall", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "")
+		t.Setenv("TINYAUTH_DOMAIN", "")
+		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
+
+		if ssoCookieStripDirective(site("heimatverein-leteln.de")) == "" {
+			t.Error("ohne bekannten Scope muss sicherheitshalber gestrippt werden")
+		}
+	})
+
+	t.Run("expliziter Scope schlaegt die Ableitung", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "auth.sub.hueske.digital")
+		t.Setenv("TINYAUTH_COOKIE_DOMAIN", ".hueske.digital")
+
+		// Ohne Override waere der Scope sub.hueske.digital - zu eng.
+		if ssoCookieStripDirective(site("kunde.hueske.digital")) == "" {
+			t.Error("TINYAUTH_COOKIE_DOMAIN wurde nicht beruecksichtigt")
+		}
+	})
+
+	t.Run("TinyAuths eigener Host bleibt ausgenommen", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "auth.hueske.digital")
+		t.Setenv("TINYAUTH_COOKIE_DOMAIN", "")
+
+		own := site("auth.hueske.digital")
+		own.Container = "caddy-tinyauth-1"
+		own.OwnerContainer = "caddy-tinyauth-1"
+		if got := ssoCookieStripDirective(own); got != "" {
+			t.Errorf("TinyAuth muss seine eigenen Cookies behalten: %s", got)
+		}
+	})
+}
+
 // TestWriteConfig_SkipsUnchangedContent: der periodische Reconcile laeuft alle
 // fuenf Minuten ueber alle Netzwerke. Wuerde WriteConfig dabei jedes Mal
 // schreiben, loeste das ueber inotify einen Caddy-Reload aller Sites aus.

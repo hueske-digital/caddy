@@ -60,7 +60,7 @@ jobs:
       # ein Image entsteht.
       - name: forward_auth bypass guard
         working-directory: ./watcher
-        run: bash test/auth-bypass.sh
+        run: bash test/auth-guard.sh
 
       # Meldet, blockiert aber nicht: die aktuell erreichbaren Funde stecken in
       # github.com/docker/docker und sind dort mit "Fixed in: N/A" gelistet - es
