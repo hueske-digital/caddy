@@ -37,6 +37,10 @@ services:
       # strip - without it TinyAuth could no longer read its own session.
       - TINYAUTH_DOMAIN=${TINYAUTH_DOMAIN:-}
       - DNS_REFRESH_INTERVAL=${DNS_REFRESH_INTERVAL:-60}
+      # Wartezeit, bevor die Config eines verschwundenen Containers entfernt
+      # wird. Muss deutlich ueber dem laengsten Update-Fenster liegen - waehrend
+      # eines Watchtower-Updates ist ein Container kurzzeitig gar nicht da.
+      - CONFIG_CLEANUP_GRACE=${CONFIG_CLEANUP_GRACE:-30m}
       # Status page: set CADDY_DOMAIN in .env to enable
       - CADDY_DOMAIN=${CADDY_DOMAIN:-}
       - CADDY_TYPE=${CADDY_TYPE:-internal}
