@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Embedded templates for Caddyfile generation
@@ -49,34 +51,48 @@ type CaddyManager struct {
 	hostsDir         string
 	allowlistManager *AllowlistManager
 	configs          map[string]*CaddyConfig // configKey (container_network) -> config
-	mu               sync.RWMutex
+	// absentSince haelt fest, seit wann zu einer Config kein Container mehr
+	// laeuft. Der State ist bewusst nur im Speicher: geht er bei einem
+	// Watcher-Neustart verloren, beginnt die Karenz von vorn. Das verzoegert
+	// das Aufraeumen, kann es aber nie verfruehen.
+	absentSince map[string]time.Time
+	// networkGone ist die zweite, getrennte Uhr: seit wann das Netzwerk einer
+	// Config nicht mehr existiert. Getrennt gehalten, weil beide Uhren
+	// unabhaengig voneinander zurueckgesetzt werden muessen - eine gemeinsame
+	// Map hiesse, dass der 5-Minuten-Sweep die Container-Karenz jedes Mal neu
+	// startet und eine verwaiste Config nie verschwaende.
+	networkGone map[string]time.Time
+	// absentGrace ist ueber CONFIG_CLEANUP_GRACE einstellbar, damit grosse
+	// Installationen mit langen Update-Laeufen die Frist hochziehen koennen.
+	absentGrace time.Duration
+	mu          sync.RWMutex
 }
 
 // ConfigInfo holds information about a configuration file
 type ConfigInfo struct {
-	Network        string
-	Container      string
-	Type           string
-	Domains        []string
-	Allowlist      []string
-	Logging        bool
-	DNSProvider    string
-	Compression    bool
-	Header         bool
-	Auth           bool
-	AuthPaths      []string
-	AuthExcept     []string
-	AuthGroups     []string
-	AuthURL        string
+	Network         string
+	Container       string
+	Type            string
+	Domains         []string
+	Allowlist       []string
+	Logging         bool
+	DNSProvider     string
+	Compression     bool
+	Header          bool
+	Auth            bool
+	AuthPaths       []string
+	AuthExcept      []string
+	AuthGroups      []string
+	AuthURL         string
 	SEO             bool
 	SEONoindexTypes []string
 	WWWRedirect     bool
-	Performance    bool
-	Security       bool
-	WordPress      bool
-	TrustedProxies []string
-	Path           string
-	Managed        bool
+	Performance     bool
+	Security        bool
+	WordPress       bool
+	TrustedProxies  []string
+	Path            string
+	Managed         bool
 }
 
 // NewCaddyManager creates a new CaddyManager
@@ -85,6 +101,9 @@ func NewCaddyManager(hostsDir string, allowlistManager *AllowlistManager) *Caddy
 		hostsDir:         hostsDir,
 		allowlistManager: allowlistManager,
 		configs:          make(map[string]*CaddyConfig),
+		absentSince:      make(map[string]time.Time),
+		networkGone:      make(map[string]time.Time),
+		absentGrace:      defaultAbsentGrace,
 	}
 }
 
@@ -114,8 +133,8 @@ func (m *CaddyManager) resolveTrustedProxies(entries []string) []string {
 //
 // Two alternatives, and both need care:
 //
-//   ^(?:tinyauth-[^=;]*=[^;]*(?:;\s*|$))+   leading run of TinyAuth cookies
-//   ;\s*tinyauth-[^=;]*=[^;]*               any later one, with its separator
+//	^(?:tinyauth-[^=;]*=[^;]*(?:;\s*|$))+   leading run of TinyAuth cookies
+//	;\s*tinyauth-[^=;]*=[^;]*               any later one, with its separator
 //
 // The leading alternative repeats (+) on purpose. Replacement scans left to
 // right and never rewinds, so after consuming the first cookie the anchor no
@@ -148,15 +167,41 @@ const ssoCookiePattern = `^(?:tinyauth-[^=;]*=[^;]*(?:;\s*|$))+|;\s*tinyauth-[^=
 // so the prefix is matched instead. The three alternatives cover a cookie appearing
 // first, last, in the middle, or alone, without leaving a stray separator behind.
 func ssoCookieStripDirective(cfg *CaddyConfig) string {
-	tinyauthDomain := strings.TrimSpace(os.Getenv("TINYAUTH_DOMAIN"))
-	if tinyauthDomain != "" {
-		for _, d := range cfg.Domains {
-			if strings.EqualFold(strings.TrimSpace(d), tinyauthDomain) {
-				return ""
-			}
-		}
+	if isTinyauthHost(cfg) {
+		return ""
 	}
 	return `header_up Cookie "` + ssoCookiePattern + `" ""`
+}
+
+// isTinyauthHost erkennt TinyAuths eigene Site.
+//
+// Erkannt wird primaer am CONTAINER, nicht an TINYAUTH_DOMAIN. Der Grund ist
+// ein realer Ausfall: docker-compose gibt dem Watcher fuer TINYAUTH_DOMAIN
+// einen LEEREN Default. Ist die Variable in der .env nicht gesetzt, greift die
+// Ausnahme nicht, TinyAuth bekommt seine eigenen Cookies gestrippt und meldet
+// beim Login "Failed to get OAuth session cookie". Der Containername ist
+// dagegen immer bekannt - das (auth)-Snippet adressiert TinyAuth an genau
+// derselben Stelle mit {env.COMPOSE_PROJECT_NAME}-tinyauth-1.
+//
+// TINYAUTH_DOMAIN bleibt als Ausnahme fuer abweichende Aufbauten bestehen.
+func isTinyauthHost(cfg *CaddyConfig) bool {
+	if project := strings.TrimSpace(os.Getenv("COMPOSE_PROJECT_NAME")); project != "" {
+		tinyauthContainer := project + "-tinyauth-1"
+		if cfg.OwnerContainer == tinyauthContainer || cfg.Container == tinyauthContainer {
+			return true
+		}
+	}
+
+	tinyauthDomain := strings.TrimSpace(os.Getenv("TINYAUTH_DOMAIN"))
+	if tinyauthDomain == "" {
+		return false
+	}
+	for _, d := range cfg.Domains {
+		if strings.EqualFold(strings.TrimSpace(d), tinyauthDomain) {
+			return true
+		}
+	}
+	return false
 }
 
 // generateReverseProxyBlock generates the reverse_proxy directive with optional trusted_proxies
@@ -223,12 +268,19 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if type changed - delete old config file if so
+	// Letzte Verteidigungslinie vor einem Schreibzugriff ausserhalb des
+	// Typverzeichnisses: filepath.Join loest "../" auf, statt es abzuweisen.
+	fileName := cfg.ConfigKey() + ".conf"
+	if err := validateConfigFileName(fileName); err != nil {
+		return err
+	}
+
+	// Bei einem Typwechsel muss die alte Datei weg. Das passiert weiter unten,
+	// NACH dem erfolgreichen Schreiben der neuen: wuerde erst geloescht und das
+	// Schreiben danach scheitern, bliebe die Site ganz ohne Konfiguration.
+	oldTypePath := ""
 	if oldCfg, exists := m.configs[cfg.ConfigKey()]; exists && oldCfg.Type != cfg.Type {
-		oldPath := filepath.Join(m.hostsDir, oldCfg.Type, cfg.ConfigKey()+".conf")
-		if err := os.Remove(oldPath); err == nil {
-			log.Printf("Removed old config (type changed): %s/%s.conf", oldCfg.Type, cfg.ConfigKey())
-		}
+		oldTypePath = filepath.Join(m.hostsDir, oldCfg.Type, fileName)
 	}
 
 	// Unregister from allowlist manager if allowlist was removed
@@ -341,7 +393,7 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 
 	// Determine file path: container_network.conf
 	dir := filepath.Join(m.hostsDir, cfg.Type)
-	path := filepath.Join(dir, cfg.ConfigKey()+".conf")
+	path := filepath.Join(dir, fileName)
 
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -349,6 +401,20 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	}
 	// Set ownership to 1000:1000
 	os.Chown(dir, 1000, 1000)
+
+	// Unveraenderte Dateien nicht neu schreiben. Jeder Schreibvorgang loest
+	// ueber inotify einen Caddy-Reload aus; ohne diesen Vergleich wuerde der
+	// periodische Reconcile alle fuenf Minuten saemtliche Sites neu laden.
+	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
+		if oldTypePath != "" {
+			if err := os.Remove(oldTypePath); err != nil && !os.IsNotExist(err) {
+				log.Printf("Warning: failed to remove old config %s: %v", oldTypePath, err)
+			}
+		}
+		cfgCopy := *cfg
+		m.configs[cfg.ConfigKey()] = &cfgCopy
+		return nil
+	}
 
 	// Write atomically via temp file
 	tmpPath := path + ".tmp"
@@ -362,6 +428,15 @@ func (m *CaddyManager) WriteConfig(cfg *CaddyConfig) error {
 	}
 	// Set ownership to 1000:1000
 	os.Chown(path, 1000, 1000)
+
+	// Neue Datei liegt - jetzt darf die alte aus dem vorherigen Typverzeichnis weg.
+	if oldTypePath != "" {
+		if err := os.Remove(oldTypePath); err == nil {
+			log.Printf("Removed old config (type changed): %s", oldTypePath)
+		} else if !os.IsNotExist(err) {
+			log.Printf("Warning: failed to remove old config %s: %v", oldTypePath, err)
+		}
+	}
 
 	// Store a copy of config for status reporting (not pointer to avoid mutation issues)
 	cfgCopy := *cfg
@@ -477,7 +552,14 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	groupsBlock := ""
 	if len(groups) > 0 {
 		// Build regex: (^|,)(group1|group2|group3)(,|$)
-		groupsRegex := fmt.Sprintf("(^|,)(%s)(,|$)", strings.Join(groups, "|"))
+		// Gruppennamen werden gequotet, damit ein Name wie ".*" die
+		// Autorisierung nicht aufhebt. validateGroup laesst Regex-Metazeichen
+		// bereits nicht durch; das hier ist die zweite Verteidigungslinie.
+		quoted := make([]string, len(groups))
+		for i, g := range groups {
+			quoted[i] = regexp.QuoteMeta(g)
+		}
+		groupsRegex := fmt.Sprintf("(^|,)(%s)(,|$)", strings.Join(quoted, "|"))
 		groupsBlock = fmt.Sprintf(`
     @auth-groups-denied {%s
         not header_regexp Remote-Groups %s
@@ -513,7 +595,7 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 			groupsBlockWithPath := fmt.Sprintf(groupsBlock, pathCondition)
 			result += groupsBlockWithPath
 		}
-		return result
+		return result + generateAuthScrubBlock(nil, except)
 	}
 
 	// Path-based auth (protect only these paths)
@@ -529,7 +611,40 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		groupsBlockWithPath := fmt.Sprintf(groupsBlock, pathCondition)
 		result += groupsBlockWithPath
 	}
-	return result
+	return result + generateAuthScrubBlock(paths, nil)
+}
+
+// generateAuthScrubBlock verhindert, dass ein Client die Identitaets-Header
+// vortaeuscht, die forward_auth sonst setzt.
+//
+// Auf Pfaden, die forward_auth abdeckt, ist das bereits sicher: copy_headers
+// loescht Remote-User/-Email/-Groups erst und setzt sie dann aus der
+// Auth-Antwort. Offen sind genau die Pfade, auf denen forward_auth NICHT
+// laeuft - dort reicht ein vom Client gesetztes Remote-User unveraendert bis
+// zum Backend, und Backends vertrauen genau diesen Headern.
+//
+// Der Matcher ist deshalb die Umkehrung des Auth-Matchers. Ein Scrub ohne
+// Matcher waere falsch: Caddy ordnet request_header NACH forward_auth (mit
+// "caddy adapt" geprueft), er wuerde also genau die Header wieder entfernen,
+// die forward_auth gerade aus der Auth-Antwort gesetzt hat.
+//
+// Deckt forward_auth die ganze Site ab, ist nichts zu tun.
+func generateAuthScrubBlock(paths []string, except []string) string {
+	var matcher string
+	switch {
+	case len(paths) > 0:
+		matcher = "not path " + strings.Join(paths, " ")
+	case len(except) > 0:
+		matcher = "path " + strings.Join(except, " ")
+	default:
+		return ""
+	}
+
+	return fmt.Sprintf(`
+    @auth-scrub %s
+    request_header @auth-scrub -Remote-User
+    request_header @auth-scrub -Remote-Email
+    request_header @auth-scrub -Remote-Groups`, matcher)
 }
 
 // generateSEONoindexTypesBlock generates a matcher and header directive to noindex specific file types
@@ -564,24 +679,20 @@ func (m *CaddyManager) RemoveConfig(network string) (bool, error) {
 
 	removed := false
 
-	// Remove from stored configs (all keys ending with _network)
-	suffix := "_" + network
-	for key := range m.configs {
-		if strings.HasSuffix(key, suffix) {
-			// Unregister from allowlist manager
-			if m.allowlistManager != nil {
-				m.allowlistManager.Unregister(key)
-			}
-			delete(m.configs, key)
-			removed = true
+	// Das Netzwerk exakt vergleichen, nicht per Dateinamens-Suffix: ConfigKey
+	// ist "container_network", und der Key "web_bar_foo_caddy" endet ebenfalls
+	// auf "_foo_caddy". Ein Suffix-Match loescht damit beim Aufraeumen von
+	// "foo_caddy" die Konfiguration des Netzwerks "bar_foo_caddy" gleich mit.
+	targets := make(map[string]bool) // Dateinamen dieses Netzwerks
+	var keys []string                // zugehoerige Config-Keys
+	for key, cfg := range m.configs {
+		if cfg.Network == network {
+			targets[key+".conf"] = true
+			keys = append(keys, key)
 		}
 	}
 
-	// Check all type directories for files matching *_network.conf
-	types := ValidTypes
-	fileSuffix := "_" + network + ".conf"
-
-	for _, t := range types {
+	for _, t := range ValidTypes {
 		dir := filepath.Join(m.hostsDir, t)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -592,17 +703,365 @@ func (m *CaddyManager) RemoveConfig(network string) (bool, error) {
 			if entry.IsDir() {
 				continue
 			}
-			if strings.HasSuffix(entry.Name(), fileSuffix) {
-				path := filepath.Join(dir, entry.Name())
-				if err := os.Remove(path); err != nil {
-					return removed, fmt.Errorf("failed to remove %s: %v", path, err)
+			name := entry.Name()
+			path := filepath.Join(dir, name)
+
+			// Nach einem Watcher-Neustart ist m.configs leer. Der Dateikopf
+			// ("# <network> - auto-generated by watcher") nennt das Netzwerk
+			// aber weiterhin exakt, deshalb entscheidet er statt des
+			// mehrdeutigen Suffixes. Dateien ohne diesen Kopf sind
+			// handgepflegt und werden nicht angefasst.
+			if !targets[name] {
+				fileNetwork, ok := configFileNetwork(path)
+				if !ok || fileNetwork != network {
+					continue
 				}
-				removed = true
+			}
+
+			if err := os.Remove(path); err != nil {
+				return removed, fmt.Errorf("failed to remove %s: %v", path, err)
+			}
+			removed = true
+		}
+	}
+
+	// Den In-Memory-State erst nach erfolgreicher Loeschung nachziehen, damit
+	// eine fehlgeschlagene Loeschung die Datei nicht als "nicht mehr verwaltet"
+	// zuruecklaesst.
+	for _, key := range keys {
+		if m.allowlistManager != nil {
+			m.allowlistManager.Unregister(key)
+		}
+		delete(m.configs, key)
+		removed = true
+	}
+
+	return removed, nil
+}
+
+// configFileHeaderSuffix markiert vom Watcher erzeugte Konfigurationen. Der
+// Kopf lautet "# <network> - auto-generated by watcher".
+const configFileHeaderSuffix = " - auto-generated by watcher"
+
+// configFileNetwork liest das Netzwerk aus dem Kopf einer erzeugten
+// Konfiguration. Der zweite Rueckgabewert ist false, wenn die Datei nicht vom
+// Watcher stammt.
+func configFileNetwork(path string) (string, bool) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	line, _, _ := strings.Cut(string(content), "\n")
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "# ") || !strings.HasSuffix(line, configFileHeaderSuffix) {
+		return "", false
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(line, "# "), configFileHeaderSuffix), true
+}
+
+// ManagedConfigs returns copies of the configs the watcher manages for a network.
+func (m *CaddyManager) ManagedConfigs(network string) []CaddyConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []CaddyConfig
+	for _, cfg := range m.configs {
+		if cfg.Network == network {
+			result = append(result, *cfg)
+		}
+	}
+	return result
+}
+
+// defaultAbsentGrace ist die Karenz, bevor die Konfiguration eines
+// verschwundenen Containers entfernt wird.
+//
+// Waehrend eines Watchtower-Updates ist ein Container kurzzeitig weg: er wird
+// gestoppt, entfernt und neu angelegt. Wird die Config in diesem Fenster
+// geloescht, loest das einen Caddy-Reload aus und nimmt die Domain fuer die
+// Dauer des Updates aus dem Proxy.
+//
+// Der Default ist bewusst grosszuegig. Das Fenster ist nicht immer kurz: bei
+// verlinkten Containern stoppt Watchtower die ganze Abhaengigkeitskette, und
+// ein Health-Check-Wait kann sich hinziehen. Zu langes Warten kostet nur eine
+// verspaetet aufgeraeumte Datei - zu kurzes nimmt eine laufende Site vom Netz.
+// Ueber CONFIG_CLEANUP_GRACE anpassbar.
+const defaultAbsentGrace = 30 * time.Minute
+
+// PruneNetwork entfernt verwaltete Konfigurationen eines Netzwerks, die nicht
+// mehr deklariert werden - etwa weil CADDY_DOMAIN aus einem Container entfernt
+// oder ein Multi-Service-Suffix gestrichen wurde. Ohne diesen Abgleich bliebe
+// die alte Datei liegen und die Domain wuerde weiter auf den Container zeigen.
+//
+// declared sind die Config-Keys, die dieser Durchlauf erzeugt hat; present die
+// Namen der Container, die aktuell im Netz haengen. Die Unterscheidung ist
+// wesentlich:
+//
+//   - Container ist da, deklariert die Config aber nicht mehr -> sofort
+//     entfernen. Das ist eine bewusste Aenderung des Nutzers.
+//   - Container fehlt -> erst nach absentGrace entfernen. Das kann ein
+//     laufendes Update sein.
+//
+// Angefasst werden ausschliesslich Configs aus m.configs, also solche, die der
+// Watcher selbst erzeugt hat. Handgepflegte Dateien in /hosts bleiben
+// unberuehrt.
+// protected sind Containernamen, deren Konfigurationen unter keinen Umstaenden
+// angefasst werden duerfen - etwa weil ihr Inspect fehlschlug oder ihre ENV
+// ungueltig ist. Die Liste wirkt unabhaengig von m.configs: nach einem
+// Watcher-Neustart ist der Speicher leer, und ohne diesen Schutz wuerde eine
+// Datei entfernt, nur weil ihre Konfiguration gerade nicht gelesen werden konnte.
+//
+// declared sind die Config-Keys, die dieser Durchlauf erzeugt hat. Alles andere
+// bekommt AUSNAHMSLOS die Karenz - auch dann, wenn der zugehoerige Container
+// nachweislich laeuft.
+//
+// allowRemoval=false pflegt nur die Uhren, ohne zu loeschen und ohne neue Uhren
+// zu starten. Der Aufrufer nutzt das, wenn er den Container-Bestand nicht
+// vollstaendig ermitteln konnte: dann ist "nicht deklariert" kein Beleg fuer
+// Abwesenheit. Die Uhr eines wieder aufgetauchten Containers muss aber auch in
+// diesem Fall zurueckgesetzt werden - sonst laeuft eine alte Uhr weiter und ein
+// spaeterer Durchlauf loescht sofort, ohne dass je durchgehend Abwesenheit
+// vorlag.
+//
+// Diese Gleichbehandlung ist Absicht. Eine Sonderregel "Container laeuft, also
+// ist das Fehlen der Deklaration endgueltig" war schon einmal da und hat in
+// Lasttests Konfigurationen sofort geloescht: die Liste der laufenden Container
+// und die Praesenzpruefung sind zwei getrennte Abfragen, und ein waehrend eines
+// Watchtower-Updates neu entstandener Container erscheint kurzzeitig nur in
+// einer von beiden. Der Zeitablauf ist das einzige Signal, das nicht von der
+// Konsistenz zweier Momentaufnahmen abhaengt.
+func (m *CaddyManager) PruneNetwork(network string, declared, protected map[string]bool, allowRemoval bool, now time.Time) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// pruneCandidate haelt fest, wo die Datei liegt und welcher Container sie
+	// besitzt. owner ist leer, wenn er nicht bekannt ist (Datei ohne
+	// In-Memory-Eintrag) - dann muss geraten werden.
+	type pruneCandidate struct {
+		typ   string
+		owner string
+	}
+
+	candidates := make(map[string]pruneCandidate)
+	for key, cfg := range m.configs {
+		if cfg.Network != network {
+			continue
+		}
+		if declared[key] {
+			delete(m.absentSince, key)
+			continue
+		}
+		candidates[key] = pruneCandidate{typ: cfg.Type, owner: cfg.OwnerContainer}
+	}
+
+	// Nach einem Watcher-Neustart ist m.configs leer, die Dateien von zuvor
+	// liegen aber noch da. Ohne diesen Durchgang wuerde eine verwaiste Config
+	// nie aufgeraeumt, solange das Netzwerk selbst in Benutzung bleibt. Der
+	// Dateikopf identifiziert dabei zuverlaessig, was vom Watcher stammt -
+	// handgepflegte Dateien haben ihn nicht.
+	for _, t := range ValidTypes {
+		dir := filepath.Join(m.hostsDir, t)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".conf") {
+				continue
+			}
+			key := strings.TrimSuffix(entry.Name(), ".conf")
+			if _, known := m.configs[key]; known {
+				continue
+			}
+			if _, seen := candidates[key]; declared[key] || seen {
+				continue
+			}
+			fileNetwork, ok := configFileNetwork(filepath.Join(dir, entry.Name()))
+			if !ok || fileNetwork != network {
+				continue
+			}
+			candidates[key] = pruneCandidate{typ: t}
+		}
+	}
+
+	var pruned []string
+	for key, cand := range candidates {
+		// Geschuetzt heisst: wir konnten nicht feststellen, was der Container
+		// will. Das ist kein Beleg fuer Abwesenheit - eine laufende Uhr wird
+		// deshalb zurueckgesetzt, statt weiterzuticken.
+		if m.ownerMatches(cand.owner, key, network, protected) {
+			delete(m.absentSince, key)
+			continue
+		}
+
+		if !allowRemoval {
+			continue
+		}
+
+		since, seen := m.absentSince[key]
+		if !seen {
+			m.absentSince[key] = now
+			log.Printf("Config %s is no longer declared, removing in %s unless it returns", key, m.absentGrace)
+			continue
+		}
+		if now.Sub(since) < m.absentGrace {
+			continue
+		}
+
+		reason := fmt.Sprintf("undeclared for %s", now.Sub(since).Round(time.Second))
+		removed, err := m.removeManagedConfig(key, filepath.Join(m.hostsDir, cand.typ, key+".conf"), reason)
+		if err != nil {
+			return pruned, err
+		}
+		if removed {
+			pruned = append(pruned, key)
+		}
+	}
+
+	return pruned, nil
+}
+
+// removeManagedConfig loescht eine verwaltete Konfiguration und zieht den
+// In-Memory-State nach.
+//
+// Das Loeschen ist der einzige Pfad, der eine laufende Site aus dem Proxy
+// nehmen kann. Er liegt deshalb bewusst an genau einer Stelle.
+func (m *CaddyManager) removeManagedConfig(key, path, reason string) (bool, error) {
+	log.Printf("Removing config %s (%s)", key, reason)
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("failed to remove %s: %v", path, err)
+	}
+	if m.allowlistManager != nil {
+		m.allowlistManager.Unregister(key)
+	}
+	delete(m.configs, key)
+	delete(m.absentSince, key)
+	delete(m.networkGone, key)
+	return true, nil
+}
+
+// PruneUnknownNetworks entfernt verwaltete Konfigurationen, deren Netzwerk gar
+// nicht mehr existiert.
+//
+// Normalerweise raeumt das network:destroy-Event auf. Laeuft der Watcher in
+// genau dem Moment nicht - etwa weil Watchtower ihn gerade aktualisiert -, geht
+// das Event verloren. Danach taucht das Netzwerk weder im Reconcile noch im
+// Cleanup-Loop je wieder auf, die Datei bliebe also dauerhaft liegen.
+//
+// existing sind die aktuell vorhandenen Proxy-Netzwerke, stillExists prueft
+// einen einzelnen Namen direkt beim Daemon nach.
+//
+// Die Listenabfrage allein reicht als Grundlage nicht: waere sie aus
+// irgendeinem Grund unvollstaendig, wuerden Konfigurationen noch existierender
+// Netzwerke geloescht. Vor jedem Loeschen wird deshalb einzeln nachgefragt.
+// Zusammen mit der Karenz muss ein Netzwerk also ueber die gesamte Frist
+// fehlen UND im Moment des Loeschens nachweislich weg sein.
+func (m *CaddyManager) PruneUnknownNetworks(existing map[string]bool, stillExists func(string) bool, now time.Time) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Ohne Rueckfragemoeglichkeit ist eine leere Liste nicht vertrauenswuerdig
+	// genug, um darauf Loeschungen zu stuetzen - sie saehe aus wie "alle
+	// Netzwerke weg". Mit stillExists wird ohnehin einzeln nachgefragt, dann
+	// darf auch der letzte Rest aufgeraeumt werden.
+	if len(existing) == 0 && stillExists == nil {
+		return nil, nil
+	}
+
+	var pruned []string
+
+	for _, t := range ValidTypes {
+		dir := filepath.Join(m.hostsDir, t)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".conf") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+
+			// Nur eigene Dateien anfassen - handgepflegte haben den Kopf nicht.
+			network, ok := configFileNetwork(path)
+			if !ok {
+				continue
+			}
+
+			key := strings.TrimSuffix(entry.Name(), ".conf")
+
+			// Netzwerk ist da: Uhr aus. Ohne diesen Reset liefe eine Uhr aus
+			// einem frueheren Durchlauf weiter, und ein spaeteres, echtes
+			// Verschwinden wuerde sofort loeschen statt die volle Frist
+			// abzuwarten.
+			if existing[network] {
+				delete(m.networkGone, key)
+				continue
+			}
+
+			// Beim Daemon nachfragen, BEVOR die Uhr startet - nicht erst vor
+			// dem Loeschen. Sonst koennte eine unvollstaendige Liste eine Uhr
+			// fuer ein Netzwerk starten, das es noch gibt; verschwindet das
+			// Netz dann kurz vor Fristende, wuerde sofort geloescht, obwohl es
+			// nie durchgehend gefehlt hat.
+			if stillExists != nil && stillExists(network) {
+				delete(m.networkGone, key)
+				continue
+			}
+
+			since, seen := m.networkGone[key]
+			if !seen {
+				m.networkGone[key] = now
+				log.Printf("Config %s belongs to a network that no longer exists, removing in %s", key, m.absentGrace)
+				continue
+			}
+			if now.Sub(since) < m.absentGrace {
+				continue
+			}
+
+			removed, err := m.removeManagedConfig(key, path, fmt.Sprintf("network %s gone for %s", network, now.Sub(since).Round(time.Second)))
+			if err != nil {
+				return pruned, err
+			}
+			if removed {
+				pruned = append(pruned, key)
 			}
 		}
 	}
 
-	return removed, nil
+	return pruned, nil
+}
+
+// ownerMatches prueft, ob die Config eines Containers in der uebergebenen
+// Namensmenge vorkommt.
+//
+// Ist der Besitzer bekannt (Config stammt aus diesem Prozess), entscheidet ein
+// exakter Namensvergleich. Nur fuer Dateien ohne In-Memory-Eintrag - also nach
+// einem Watcher-Neustart - muss aus dem Dateinamen geraten werden. Compose
+// benennt Container "<projekt>-<service>-<nummer>", der Key ist
+// "<container>_<network>" bzw. im Multi-Service-Modus
+// "<container>-<service>_<network>".
+func (m *CaddyManager) ownerMatches(owner, key, network string, names map[string]bool) bool {
+	if len(names) == 0 {
+		return false
+	}
+	if owner != "" {
+		return names[owner]
+	}
+
+	container := strings.TrimSuffix(key, "_"+network)
+	if names[container] {
+		return true
+	}
+	// Multi-Service: der Servicename haengt hinten dran.
+	for name := range names {
+		if strings.HasPrefix(container, name+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // ListConfigs returns all configuration files
@@ -818,8 +1277,20 @@ func (m *CaddyManager) WriteWildcardConfigs(domains []string, dnsProvider string
 	}
 	os.Chown(dir, 1000, 1000)
 
+	if err := validateWildcardDNSProvider(dnsProvider); err != nil {
+		return fmt.Errorf("WILDCARD_DNS_PROVIDER: %w", err)
+	}
+
 	for _, domain := range domains {
+		// Die Domain wird Teil des Dateinamens und des Caddyfiles - beides
+		// braucht dieselbe Pruefung wie eine CADDY_DOMAIN.
+		if !isValidDomain(domain) {
+			return fmt.Errorf("invalid wildcard domain: %s", domain)
+		}
 		filename := fmt.Sprintf("wildcard.%s.conf", domain)
+		if err := validateConfigFileName(filename); err != nil {
+			return err
+		}
 		path := filepath.Join(dir, filename)
 
 		// Generate content from template

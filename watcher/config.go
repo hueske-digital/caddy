@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Type constants for CADDY_TYPE
@@ -42,32 +43,42 @@ type Config struct {
 	CodeEditorURL       string   // optional, base URL for code editor links
 	WildcardDomains     []string // optional, domains to generate wildcard certs for
 	WildcardDNSProvider string   // WILDCARD_DNS_PROVIDER (cloudflare|hetzner, default: cloudflare)
+	// CleanupGrace ist die Wartezeit, bevor die Config eines verschwundenen
+	// Containers entfernt wird (CONFIG_CLEANUP_GRACE, z. B. "45m").
+	CleanupGrace time.Duration
 }
 
 // CaddyConfig holds the parsed configuration for a service
 type CaddyConfig struct {
-	Network     string   // Network name
-	Container   string   // Container name
-	Domains     []string // From CADDY_DOMAIN (comma-separated)
-	Type        string   // internal, external, cloudflare
-	Upstream    string   // container:port
-	Allowlist   []string // From CADDY_ALLOWLIST (comma-separated hostnames/IPs)
-	Logging     bool     // From CADDY_LOGGING (optional, default false)
-	DNSProvider string   // From CADDY_DNS_PROVIDER (cloudflare|hetzner|http, default: cloudflare)
-	Compression bool     // From CADDY_COMPRESSION (optional, default true)
-	Header      bool     // From CADDY_HEADER (optional, default true)
-	Auth        bool     // From CADDY_AUTH (optional, default false)
-	AuthURL     string   // From CADDY_AUTH_URL (optional, custom auth server URL)
-	AuthPaths   []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
-	AuthExcept  []string // From CADDY_AUTH_EXCEPT (optional, if set protect all EXCEPT these paths)
-	AuthGroups  []string // From CADDY_AUTH_GROUPS (optional, restrict access to these groups)
-	SEO              bool     // From CADDY_SEO (optional, default false = noindex)
-	SEONoindexTypes  []string // From CADDY_SEO_NOINDEX_TYPES (optional, file extensions to noindex when SEO=true)
-	WWWRedirect      bool     // From CADDY_WWW_REDIRECT (optional, default false)
-	Performance    bool     // From CADDY_PERFORMANCE (optional, default true)
-	Security       bool     // From CADDY_SECURITY (optional, default true)
-	WordPress      bool     // From CADDY_WORDPRESS (optional, default false)
-	TrustedProxies []string // From CADDY_TRUSTED_PROXIES (optional, IPs/hostnames for reverse_proxy)
+	Network string // Network name
+	// Container ist der Name, der in den Dateinamen eingeht. Im
+	// Multi-Service-Modus ist das "<container>-<service>", nicht der reine
+	// Containername.
+	Container string
+	// OwnerContainer ist der tatsaechliche Docker-Containername. Nur damit
+	// laesst sich zuverlaessig pruefen, ob der zugehoerige Container laeuft -
+	// aus Container allein waere das im Multi-Service-Modus nur zu raten.
+	OwnerContainer  string
+	Domains         []string // From CADDY_DOMAIN (comma-separated)
+	Type            string   // internal, external, cloudflare
+	Upstream        string   // container:port
+	Allowlist       []string // From CADDY_ALLOWLIST (comma-separated hostnames/IPs)
+	Logging         bool     // From CADDY_LOGGING (optional, default false)
+	DNSProvider     string   // From CADDY_DNS_PROVIDER (cloudflare|hetzner|http, default: cloudflare)
+	Compression     bool     // From CADDY_COMPRESSION (optional, default true)
+	Header          bool     // From CADDY_HEADER (optional, default true)
+	Auth            bool     // From CADDY_AUTH (optional, default false)
+	AuthURL         string   // From CADDY_AUTH_URL (optional, custom auth server URL)
+	AuthPaths       []string // From CADDY_AUTH_PATHS (optional, if set only these paths require auth)
+	AuthExcept      []string // From CADDY_AUTH_EXCEPT (optional, if set protect all EXCEPT these paths)
+	AuthGroups      []string // From CADDY_AUTH_GROUPS (optional, restrict access to these groups)
+	SEO             bool     // From CADDY_SEO (optional, default false = noindex)
+	SEONoindexTypes []string // From CADDY_SEO_NOINDEX_TYPES (optional, file extensions to noindex when SEO=true)
+	WWWRedirect     bool     // From CADDY_WWW_REDIRECT (optional, default false)
+	Performance     bool     // From CADDY_PERFORMANCE (optional, default true)
+	Security        bool     // From CADDY_SECURITY (optional, default true)
+	WordPress       bool     // From CADDY_WORDPRESS (optional, default false)
+	TrustedProxies  []string // From CADDY_TRUSTED_PROXIES (optional, IPs/hostnames for reverse_proxy)
 }
 
 // ConfigKey returns the unique key for this config (container_network)
@@ -107,6 +118,21 @@ func LoadConfig() (*Config, error) {
 	// Optional wildcard domains for automatic wildcard cert generation
 	wildcardDomains := splitCommaSeparated(os.Getenv("WILDCARD_DOMAINS"))
 
+	// Karenz vor dem Aufraeumen verwaister Configs. Grosse Installationen mit
+	// langen Update-Laeufen koennen sie hochziehen.
+	cleanupGrace := defaultAbsentGrace
+	if raw := os.Getenv("CONFIG_CLEANUP_GRACE"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		switch {
+		case err != nil:
+			log.Printf("Warning: invalid CONFIG_CLEANUP_GRACE %q, using %s", raw, cleanupGrace)
+		case parsed <= 0:
+			log.Printf("Warning: CONFIG_CLEANUP_GRACE must be positive, using %s", cleanupGrace)
+		default:
+			cleanupGrace = parsed
+		}
+	}
+
 	// DNS provider for wildcard certs (cloudflare or hetzner, default: cloudflare)
 	wildcardDNSProvider := os.Getenv("WILDCARD_DNS_PROVIDER")
 	if wildcardDNSProvider == "" {
@@ -121,6 +147,7 @@ func LoadConfig() (*Config, error) {
 		CodeEditorURL:       codeEditorURL,
 		WildcardDomains:     wildcardDomains,
 		WildcardDNSProvider: wildcardDNSProvider,
+		CleanupGrace:        cleanupGrace,
 	}, nil
 }
 
@@ -163,8 +190,8 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	}
 
 	// Validate port
-	if _, err := strconv.Atoi(port); err != nil {
-		return nil, fmt.Errorf("invalid CADDY_PORT: %s (must be numeric)", port)
+	if err := validatePort(port); err != nil {
+		return nil, fmt.Errorf("CADDY_PORT: %w", err)
 	}
 
 	// Parse and validate domains
@@ -187,21 +214,21 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	allowlist := splitCommaSeparated(env["CADDY_ALLOWLIST"])
 
 	// Parse optional flags
-	logging := env["CADDY_LOGGING"] == "true"           // default: off
-	dnsProvider := env["CADDY_DNS_PROVIDER"]            // cloudflare|hetzner|http, default: cloudflare
+	logging := env["CADDY_LOGGING"] == "true" // default: off
+	dnsProvider := env["CADDY_DNS_PROVIDER"]  // cloudflare|hetzner|http, default: cloudflare
 	if dnsProvider == "" {
 		dnsProvider = "cloudflare"
 	}
-	compression := env["CADDY_COMPRESSION"] != "false" // default: on
-	header := env["CADDY_HEADER"] != "false"           // default: on
-	auth := env["CADDY_AUTH"] == "true"                 // default: off
-	authURL := env["CADDY_AUTH_URL"]                    // optional: custom auth server URL
-	seo := env["CADDY_SEO"] == "true"                   // default: off (= noindex)
+	compression := env["CADDY_COMPRESSION"] != "false"                     // default: on
+	header := env["CADDY_HEADER"] != "false"                               // default: on
+	auth := env["CADDY_AUTH"] == "true"                                    // default: off
+	authURL := env["CADDY_AUTH_URL"]                                       // optional: custom auth server URL
+	seo := env["CADDY_SEO"] == "true"                                      // default: off (= noindex)
 	seoNoindexTypes := splitCommaSeparated(env["CADDY_SEO_NOINDEX_TYPES"]) // optional: file types to noindex when SEO=true
-	wwwRedirect := env["CADDY_WWW_REDIRECT"] == "true" // default: off
-	performance := env["CADDY_PERFORMANCE"] != "false" // default: on
-	security := env["CADDY_SECURITY"] != "false"       // default: on
-	wordpress := env["CADDY_WORDPRESS"] == "true"       // default: off
+	wwwRedirect := env["CADDY_WWW_REDIRECT"] == "true"                     // default: off
+	performance := env["CADDY_PERFORMANCE"] != "false"                     // default: on
+	security := env["CADDY_SECURITY"] != "false"                           // default: on
+	wordpress := env["CADDY_WORDPRESS"] == "true"                          // default: off
 
 	// Parse auth paths (optional)
 	authPaths := splitCommaSeparated(env["CADDY_AUTH_PATHS"])
@@ -217,21 +244,22 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 	// Parse trusted proxies (optional, for reverse_proxy block)
 	trustedProxies := splitCommaSeparated(env["CADDY_TRUSTED_PROXIES"])
 
-	return &CaddyConfig{
-		Network:        network,
-		Container:      name,
-		Domains:        domains,
-		Type:           typ,
-		Upstream:       upstream,
-		Allowlist:      allowlist,
-		Logging:        logging,
-		DNSProvider:    dnsProvider,
-		Compression:    compression,
-		Header:         header,
-		Auth:           auth,
-		AuthURL:        authURL,
-		AuthPaths:      authPaths,
-		AuthExcept:     authExcept,
+	cfg := &CaddyConfig{
+		Network:         network,
+		Container:       name,
+		OwnerContainer:  name,
+		Domains:         domains,
+		Type:            typ,
+		Upstream:        upstream,
+		Allowlist:       allowlist,
+		Logging:         logging,
+		DNSProvider:     dnsProvider,
+		Compression:     compression,
+		Header:          header,
+		Auth:            auth,
+		AuthURL:         authURL,
+		AuthPaths:       authPaths,
+		AuthExcept:      authExcept,
 		AuthGroups:      authGroups,
 		SEO:             seo,
 		SEONoindexTypes: seoNoindexTypes,
@@ -240,7 +268,13 @@ func ParseCaddyEnv(env map[string]string, network string, containerName string) 
 		Security:        security,
 		WordPress:       wordpress,
 		TrustedProxies:  trustedProxies,
-	}, nil
+	}
+
+	if err := validateCaddyConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 // ParseAllCaddyEnv parses CADDY_* environment variables from a container
@@ -308,6 +342,12 @@ func parseMultiServiceEnv(env map[string]string, network string, containerName s
 
 // parseSingleServiceEnv parses environment variables for a single service in multi-service mode
 func parseSingleServiceEnv(env map[string]string, network string, containerName string, serviceName string) (*CaddyConfig, error) {
+	// Der Service-Name wird Teil des Dateinamens - ohne diese Pruefung koennte
+	// ein Suffix mit "../" in ein fremdes Typverzeichnis schreiben.
+	if err := validateServiceName(serviceName); err != nil {
+		return nil, err
+	}
+
 	// Helper to get service-specific env var
 	getEnv := func(key string) string {
 		return env[key+"_"+serviceName]
@@ -347,8 +387,8 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 	}
 
 	// Validate port
-	if _, err := strconv.Atoi(port); err != nil {
-		return nil, fmt.Errorf("invalid CADDY_PORT_%s: %s (must be numeric)", serviceName, port)
+	if err := validatePort(port); err != nil {
+		return nil, fmt.Errorf("CADDY_PORT_%s: %w", serviceName, err)
 	}
 
 	// Parse and validate domains
@@ -395,21 +435,22 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 	wordpress := getEnv("CADDY_WORDPRESS") == "true"
 	trustedProxies := splitCommaSeparated(getEnv("CADDY_TRUSTED_PROXIES"))
 
-	return &CaddyConfig{
-		Network:        network,
-		Container:      name + "-" + serviceName, // Unique container name per service
-		Domains:        domains,
-		Type:           typ,
-		Upstream:       upstream,
-		Allowlist:      allowlist,
-		Logging:        logging,
-		DNSProvider:    dnsProvider,
-		Compression:    compression,
-		Header:         header,
-		Auth:           auth,
-		AuthURL:        authURL,
-		AuthPaths:      authPaths,
-		AuthExcept:     authExcept,
+	cfg := &CaddyConfig{
+		Network:         network,
+		Container:       name + "-" + serviceName, // Unique container name per service
+		OwnerContainer:  name,
+		Domains:         domains,
+		Type:            typ,
+		Upstream:        upstream,
+		Allowlist:       allowlist,
+		Logging:         logging,
+		DNSProvider:     dnsProvider,
+		Compression:     compression,
+		Header:          header,
+		Auth:            auth,
+		AuthURL:         authURL,
+		AuthPaths:       authPaths,
+		AuthExcept:      authExcept,
 		AuthGroups:      authGroups,
 		SEO:             seo,
 		SEONoindexTypes: seoNoindexTypes,
@@ -418,38 +459,17 @@ func parseSingleServiceEnv(env map[string]string, network string, containerName 
 		Security:        security,
 		WordPress:       wordpress,
 		TrustedProxies:  trustedProxies,
-	}, nil
+	}
+
+	if err := validateCaddyConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
-// isValidDomain performs basic domain validation
+// isValidDomain performs basic domain validation. A domain is a hostname that
+// additionally requires at least one dot.
 func isValidDomain(domain string) bool {
-	if len(domain) == 0 || len(domain) > 253 {
-		return false
-	}
-
-	// Basic pattern: alphanumeric, hyphens, dots
-	// Must have at least one dot for a valid domain
-	if !strings.Contains(domain, ".") {
-		return false
-	}
-
-	// Check each label
-	labels := strings.Split(domain, ".")
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 {
-			return false
-		}
-		// Labels can't start or end with hyphen
-		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-			return false
-		}
-		// Only alphanumeric and hyphens
-		for _, c := range label {
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
-				return false
-			}
-		}
-	}
-
-	return true
+	return strings.Contains(domain, ".") && isValidHostname(domain)
 }

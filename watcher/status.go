@@ -9,29 +9,29 @@ import (
 
 // ServiceStatus represents a service in the status
 type ServiceStatus struct {
-	Network        string   `json:"network"`
-	Container      string   `json:"container,omitempty"`
-	Type           string   `json:"type"`
-	Domains        []string `json:"domains"`
-	Allowlist      []string `json:"allowlist,omitempty"`
-	TrustedProxies []string `json:"trustedProxies,omitempty"`
-	Logging        bool     `json:"logging"`
-	DNSProvider    string   `json:"dnsProvider,omitempty"`
-	Compression    bool     `json:"compression"`
-	Header         bool     `json:"header"`
-	Auth           bool     `json:"auth"`
-	AuthPaths      []string `json:"authPaths,omitempty"`
-	AuthExcept     []string `json:"authExcept,omitempty"`
-	AuthGroups     []string `json:"authGroups,omitempty"`
-	AuthURL        string   `json:"authUrl,omitempty"`
+	Network         string   `json:"network"`
+	Container       string   `json:"container,omitempty"`
+	Type            string   `json:"type"`
+	Domains         []string `json:"domains"`
+	Allowlist       []string `json:"allowlist,omitempty"`
+	TrustedProxies  []string `json:"trustedProxies,omitempty"`
+	Logging         bool     `json:"logging"`
+	DNSProvider     string   `json:"dnsProvider,omitempty"`
+	Compression     bool     `json:"compression"`
+	Header          bool     `json:"header"`
+	Auth            bool     `json:"auth"`
+	AuthPaths       []string `json:"authPaths,omitempty"`
+	AuthExcept      []string `json:"authExcept,omitempty"`
+	AuthGroups      []string `json:"authGroups,omitempty"`
+	AuthURL         string   `json:"authUrl,omitempty"`
 	SEO             bool     `json:"seo"`
 	SEONoindexTypes []string `json:"seoNoindexTypes,omitempty"`
 	WWWRedirect     bool     `json:"wwwRedirect"`
-	Performance    bool     `json:"performance"`
-	Security       bool     `json:"security"`
-	WordPress      bool     `json:"wordpress"`
-	Managed        bool     `json:"managed"`
-	ConfigPath     string   `json:"configPath,omitempty"`
+	Performance     bool     `json:"performance"`
+	Security        bool     `json:"security"`
+	WordPress       bool     `json:"wordpress"`
+	Managed         bool     `json:"managed"`
+	ConfigPath      string   `json:"configPath,omitempty"`
 }
 
 // Status represents the status structure
@@ -87,29 +87,29 @@ func (m *StatusManager) Update(configs []ConfigInfo) {
 	// Add all configs (managed and manual)
 	for _, cfg := range configs {
 		services = append(services, ServiceStatus{
-			Network:        cfg.Network,
-			Container:      cfg.Container,
-			Type:           cfg.Type,
-			Domains:        cfg.Domains,
-			Allowlist:      cfg.Allowlist,
-			TrustedProxies: cfg.TrustedProxies,
-			Logging:        cfg.Logging,
-			DNSProvider:    cfg.DNSProvider,
-			Compression:    cfg.Compression,
-			Header:         cfg.Header,
-			Auth:           cfg.Auth,
-			AuthPaths:      cfg.AuthPaths,
-			AuthExcept:     cfg.AuthExcept,
-			AuthGroups:     cfg.AuthGroups,
-			AuthURL:        cfg.AuthURL,
+			Network:         cfg.Network,
+			Container:       cfg.Container,
+			Type:            cfg.Type,
+			Domains:         cfg.Domains,
+			Allowlist:       cfg.Allowlist,
+			TrustedProxies:  cfg.TrustedProxies,
+			Logging:         cfg.Logging,
+			DNSProvider:     cfg.DNSProvider,
+			Compression:     cfg.Compression,
+			Header:          cfg.Header,
+			Auth:            cfg.Auth,
+			AuthPaths:       cfg.AuthPaths,
+			AuthExcept:      cfg.AuthExcept,
+			AuthGroups:      cfg.AuthGroups,
+			AuthURL:         cfg.AuthURL,
 			SEO:             cfg.SEO,
 			SEONoindexTypes: cfg.SEONoindexTypes,
 			WWWRedirect:     cfg.WWWRedirect,
-			Performance:    cfg.Performance,
-			Security:       cfg.Security,
-			WordPress:      cfg.WordPress,
-			Managed:        cfg.Managed,
-			ConfigPath:     cfg.Path,
+			Performance:     cfg.Performance,
+			Security:        cfg.Security,
+			WordPress:       cfg.WordPress,
+			Managed:         cfg.Managed,
+			ConfigPath:      cfg.Path,
 		})
 	}
 

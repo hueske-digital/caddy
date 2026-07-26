@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -36,6 +38,8 @@ func main() {
 
 	// Create managers
 	caddyMgr := NewCaddyManager(cfg.HostsDir, allowlistMgr)
+	caddyMgr.absentGrace = cfg.CleanupGrace
+	log.Printf("Stale config cleanup grace: %s", cfg.CleanupGrace)
 	statusDomain := os.Getenv("CADDY_DOMAIN")
 	statusMgr := NewStatusManager(cfg.CodeEditorURL, statusDomain)
 
@@ -124,7 +128,17 @@ func processExistingNetworks(ctx context.Context, docker *DockerClient, caddyMgr
 	return nil
 }
 
+// reconcileMu serialisiert die Abgleiche. Sie werden aus drei Richtungen
+// angestossen - Docker-Events, Cleanup-Loop und DNS-Aenderungen - und jeder
+// Lauf baut sich vorher einen eigenen Schnappschuss der Container. Ohne
+// Serialisierung koennte ein langsamer alter Lauf am Ende eine Konfiguration
+// entfernen, die ein neuerer Lauf gerade erst geschrieben hat.
+var reconcileMu sync.Mutex
+
 func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManager, network string, cfg *Config) error {
+	reconcileMu.Lock()
+	defer reconcileMu.Unlock()
+
 	containers, err := docker.GetNetworkContainers(network)
 	if err != nil {
 		return err
@@ -134,6 +148,22 @@ func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyM
 		log.Printf("No containers in network %s", network)
 		return nil
 	}
+
+	// keep sammelt alle Config-Keys, die dieses Netzwerk aktuell noch haben
+	// soll. Alles andere wird am Ende entfernt, damit eine entfernte
+	// CADDY_DOMAIN nicht als verwaiste Datei weiterroutet.
+	keep := make(map[string]bool)
+
+	// Aufgeraeumt wird nur, wenn wirklich jeder Container zugeordnet werden
+	// konnte. Ein einziger nicht zuordenbarer Container macht "keep"
+	// unvollstaendig - dann waere Pruning ein Loeschen auf Verdacht.
+	inventoryComplete := true
+
+	// Container, deren Konfiguration nicht gelesen werden konnte. Ihre Dateien
+	// bleiben unangetastet - unabhaengig davon, ob der Watcher sie im Speicher
+	// hat. Ohne das wuerde nach einem Neustart ein einziger fehlgeschlagener
+	// Inspect reichen, um eine laufende Site sofort abzuraeumen.
+	protected := make(map[string]bool)
 
 	for _, container := range containers {
 		containerName := ""
@@ -146,21 +176,35 @@ func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyM
 			continue
 		}
 
+		// Container ohne Namen kann nicht adressiert werden - Docker liefert das
+		// bei Containern, die waehrend der Abfrage verschwinden.
+		if containerName == "" {
+			log.Printf("Skipping container %s (no name)", container.ID[:12])
+			inventoryComplete = false
+			continue
+		}
 		// Get container environment variables
 		env, err := docker.GetContainerEnv(container.ID)
 		if err != nil {
+			// Transienter Docker-Fehler: bestehende Configs dieses Containers
+			// behalten, statt eine laufende Site abzuraeumen.
 			log.Printf("Failed to inspect container %s: %v", container.ID[:12], err)
+			protected[containerName] = true
 			continue
 		}
 
 		// Parse CADDY_* variables (supports both single and multi-service modes)
-		configs, err := ParseAllCaddyEnv(env, network, container.Names[0])
+		configs, err := ParseAllCaddyEnv(env, network, containerName)
 		if err != nil {
+			// Fehlerhafte ENV ist meist ein Tippfehler. Die letzte gueltige
+			// Konfiguration bleibt bestehen, damit ein Tippfehler nicht die
+			// Site offline nimmt.
 			log.Printf("Invalid config for %s: %v", containerName, err)
+			protected[containerName] = true
 			continue
 		}
 		if configs == nil {
-			continue // No CADDY_* variables, skip silently
+			continue // No CADDY_* variables - darf aufgeraeumt werden
 		}
 
 		// Process each config (single-service: 1 config, multi-service: multiple configs)
@@ -173,10 +217,27 @@ func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyM
 			// Write config
 			if err := caddyMgr.WriteConfig(config); err != nil {
 				log.Printf("Failed to write config for %s: %v", config.ConfigKey(), err)
+				keep[config.ConfigKey()] = true // nicht wegen Schreibfehler loeschen
 				continue
 			}
+			keep[config.ConfigKey()] = true
 			log.Printf("Generated config: %s/%s.conf", config.Type, config.ConfigKey())
 		}
+	}
+
+	// Bei unvollstaendigem Bestand wird nicht geloescht - die Uhren muessen
+	// aber trotzdem gepflegt werden, damit eine zurueckgekehrte Config ihre
+	// alte Uhr verliert.
+	if !inventoryComplete {
+		log.Printf("Skipping cleanup for %s (container inventory incomplete)", network)
+	}
+
+	pruned, err := caddyMgr.PruneNetwork(network, keep, protected, inventoryComplete, time.Now())
+	if err != nil {
+		return err
+	}
+	for _, key := range pruned {
+		log.Printf("Removed stale config: %s.conf (no longer declared)", key)
 	}
 
 	return nil
@@ -186,4 +247,3 @@ func generateConfigsForNetwork(ctx context.Context, docker *DockerClient, caddyM
 func regenerateConfigForNetwork(ctx context.Context, docker *DockerClient, caddyMgr *CaddyManager, network string, cfg *Config) error {
 	return generateConfigsForNetwork(ctx, docker, caddyMgr, network, cfg)
 }
-

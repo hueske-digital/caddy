@@ -1,8 +1,121 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
 )
+
+// TestQueryDoHType_EscapesHostname: der Hostname stammt aus CADDY_ALLOWLIST.
+// Ohne Kodierung koennte er zusaetzliche Query-Parameter einschleusen.
+func TestQueryDoHType_EscapesHostname(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Write([]byte(`{"Answer":[]}`))
+	}))
+	defer srv.Close()
+
+	if _, err := queryDoHType(srv.URL, "evil.example.com&type=TXT&name=other.com", "A"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := gotQuery.Get("type"); got != "A" {
+		t.Errorf("record type was overridden by the hostname: %q", got)
+	}
+	if names := gotQuery["name"]; len(names) != 1 {
+		t.Errorf("expected exactly one name parameter, got %v", names)
+	}
+}
+
+// TestQueryDoHType_RejectsNonIPAnswers: die Antwort landet in einem
+// remote_ip-Matcher. Was keine IP ist, darf dort nicht ankommen.
+func TestQueryDoHType_RejectsNonIPAnswers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"Answer": []map[string]any{
+				{"type": 1, "data": "1.2.3.4"},
+				{"type": 1, "data": "not-an-ip respond \"pwned\" 200"},
+				{"type": 28, "data": "2001:db8::1"},
+				{"type": 5, "data": "cname.example.com"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	ips, err := queryDoHType(srv.URL, "a.example.com", "A")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := map[string]bool{"1.2.3.4": true, "2001:db8::1": true}
+	if len(ips) != len(want) {
+		t.Fatalf("expected only valid IPs, got %v", ips)
+	}
+	for _, ip := range ips {
+		if !want[ip] {
+			t.Errorf("non-IP answer passed through: %q", ip)
+		}
+	}
+}
+
+// TestQueryDoHType_LimitsResponseSize: eine fehlerhafte oder boesartige
+// Gegenstelle darf den Watcher nicht beliebig viel Speicher lesen lassen.
+func TestQueryDoHType_LimitsResponseSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"Answer":[{"type":1,"data":"`))
+		w.Write([]byte(strings.Repeat("A", maxDoHResponse*2)))
+		w.Write([]byte(`"}]}`))
+	}))
+	defer srv.Close()
+
+	// Abgeschnittenes JSON -> Parse-Fehler statt unbegrenztem Lesen.
+	if _, err := queryDoHType(srv.URL, "a.example.com", "A"); err == nil {
+		t.Error("expected an error for an oversized response")
+	}
+}
+
+// TestRefreshAll_DoesNotHoldLockDuringResolution: waehrend der Aufloesung
+// muessen Leser durchkommen, sonst blockiert eine haengende DNS-Abfrage jede
+// Statusabfrage und jedes Schreiben einer Konfiguration.
+func TestRefreshAll_DoesNotHoldLockDuringResolution(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.Write([]byte(`{"Answer":[]}`))
+	}))
+	defer srv.Close()
+
+	original := dohEndpoints
+	dohEndpoints = []string{srv.URL}
+	defer func() { dohEndpoints = original }()
+
+	m := NewAllowlistManager(60, nil)
+	m.configs["web_app_caddy"] = &CaddyConfig{
+		Network: "app_caddy", Container: "web",
+		Allowlist: []string{"slow.example.com"},
+	}
+
+	done := make(chan struct{})
+	go func() { m.refreshAll(); close(done) }()
+
+	// Der Leser darf nicht auf die haengende Aufloesung warten muessen.
+	read := make(chan struct{})
+	go func() { m.GetResolvedIPs("web_app_caddy"); close(read) }()
+
+	select {
+	case <-read:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reader blocked while DNS resolution was in flight")
+	}
+
+	close(release)
+	<-done
+}
 
 func TestResolveAllowlistWithFallback_KeepsPreviousOnFailure(t *testing.T) {
 	am := NewAllowlistManager(0, nil)

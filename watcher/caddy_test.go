@@ -1,9 +1,9 @@
 package main
 
 import (
-	"regexp"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -1444,8 +1444,11 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "@auth-paths path /admin/*") {
 			t.Error("expected path matcher when paths is set")
 		}
-		if strings.Contains(result, "not path") {
-			t.Error("unexpected 'not path' when paths is set")
+		// Geprueft wird der AUTH-Matcher: er muss "path" sein, nicht "not path".
+		// Der Scrub-Matcher (@auth-scrub) ist bewusst dessen Umkehrung und
+		// enthaelt deshalb legitim ein "not path".
+		if strings.Contains(result, "@auth-paths not path") {
+			t.Error("unexpected 'not path' on the auth matcher when paths is set")
 		}
 	})
 }

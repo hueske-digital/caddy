@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -16,8 +17,8 @@ import (
 
 // DoH endpoints
 var dohEndpoints = []string{
-	"https://1.1.1.1/dns-query",         // Cloudflare
-	"https://dns.google/dns-query",       // Google
+	"https://1.1.1.1/dns-query",    // Cloudflare
+	"https://dns.google/dns-query", // Google
 }
 
 // HTTP client for DoH requests
@@ -65,11 +66,17 @@ func queryDoH(endpoint, hostname string) ([]string, error) {
 	return ips, nil
 }
 
+// maxDoHResponse deckelt die Antwortgroesse. Ohne Limit liesse sich der Watcher
+// ueber eine manipulierte oder fehlerhafte Gegenstelle beliebig viel Speicher
+// lesen.
+const maxDoHResponse = 64 << 10
+
 // queryDoHType queries a specific record type
 func queryDoHType(endpoint, hostname, recordType string) ([]string, error) {
-	url := fmt.Sprintf("%s?name=%s&type=%s", endpoint, hostname, recordType)
-
-	req, err := http.NewRequest("GET", url, nil)
+	// Query-Parameter kodieren statt zusammenstringen: der Hostname stammt aus
+	// CADDY_ALLOWLIST und koennte sonst weitere Parameter einschleusen.
+	query := url.Values{"name": {hostname}, "type": {recordType}}
+	req, err := http.NewRequest(http.MethodGet, endpoint+"?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +92,7 @@ func queryDoHType(endpoint, hostname, recordType string) ([]string, error) {
 		return nil, fmt.Errorf("DoH request failed: %s", resp.Status)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDoHResponse))
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +105,17 @@ func queryDoHType(endpoint, hostname, recordType string) ([]string, error) {
 	var ips []string
 	for _, answer := range dohResp.Answer {
 		// Type 1 = A record (IPv4), Type 28 = AAAA record (IPv6)
-		if answer.Type == 1 || answer.Type == 28 {
-			ips = append(ips, answer.Data)
+		if answer.Type != 1 && answer.Type != 28 {
+			continue
 		}
+		// Die Antwort landet in einem remote_ip-Matcher im Caddyfile. Was
+		// keine IP ist, hat dort nichts zu suchen - unabhaengig davon, ob es
+		// ein Fehler der Gegenstelle oder Absicht ist.
+		if net.ParseIP(answer.Data) == nil {
+			log.Printf("Ignoring non-IP answer %q for %s from %s", answer.Data, hostname, endpoint)
+			continue
+		}
+		ips = append(ips, answer.Data)
 	}
 
 	return ips, nil
@@ -138,13 +153,16 @@ func (m *AllowlistManager) Register(cfg *CaddyConfig) {
 		return
 	}
 
+	// Aufloesen vor dem Lock, aus demselben Grund wie in refreshAll: der
+	// Aufrufer haelt hier bereits den CaddyManager-Lock, jede zusaetzliche
+	// Sekunde unter dem Allowlist-Lock blockiert auch alle Leser.
+	key := cfg.ConfigKey()
+	resolved := m.resolveAllowlist(cfg.Allowlist)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := cfg.ConfigKey()
 	m.configs[key] = cfg
-	// Resolve immediately
-	resolved := m.resolveAllowlist(cfg.Allowlist)
 	m.resolvedIPs[key] = resolved
 	log.Printf("Registered allowlist for %s: %v -> %v", key, cfg.Allowlist, resolved)
 }
@@ -203,23 +221,61 @@ func (m *AllowlistManager) Start(ctx context.Context) {
 	}
 }
 
-// refreshAll resolves all registered allowlists and checks for changes
+// refreshAll resolves all registered allowlists and checks for changes.
+//
+// Die Aufloesung laeuft bewusst OHNE gehaltenen Lock. Pro Hostname koennen zwei
+// DoH-Endpunkte mal zwei Record-Typen mal zehn Sekunden Timeout anfallen; wuerde
+// der Lock darueber gehalten, blockierten Statusabfragen und jedes Schreiben
+// einer Konfiguration fuer diese Dauer mit.
 func (m *AllowlistManager) refreshAll() {
+	type job struct {
+		key      string
+		entries  []string
+		previous []string
+	}
+
+	// 1. Snapshot ziehen.
+	m.mu.RLock()
+	jobs := make([]job, 0, len(m.configs))
+	for key, cfg := range m.configs {
+		jobs = append(jobs, job{
+			key:      key,
+			entries:  append([]string(nil), cfg.Allowlist...),
+			previous: append([]string(nil), m.resolvedIPs[key]...),
+		})
+	}
+	m.mu.RUnlock()
+
+	// 2. Auflösen ohne Lock.
+	results := make(map[string][]string, len(jobs))
+	for _, j := range jobs {
+		results[j.key] = m.resolveAllowlistWithFallback(j.entries, j.previous)
+	}
+
+	// 3. Ergebnisse kurz unter Lock zurueckschreiben.
+	var changed []string
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for configKey, cfg := range m.configs {
-		oldResolved := m.resolvedIPs[configKey]
-		newResolved := m.resolveAllowlistWithFallback(cfg.Allowlist, oldResolved)
-
+	for key, newResolved := range results {
+		// Zwischenzeitlich abgemeldet? Dann nicht wieder eintragen.
+		if _, ok := m.configs[key]; !ok {
+			continue
+		}
+		oldResolved := m.resolvedIPs[key]
 		if !equalStringSlices(oldResolved, newResolved) {
-			log.Printf("DNS changed for %s: %v -> %v", configKey, oldResolved, newResolved)
-			m.resolvedIPs[configKey] = newResolved
+			log.Printf("DNS changed for %s: %v -> %v", key, oldResolved, newResolved)
+			m.resolvedIPs[key] = newResolved
+			changed = append(changed, key)
+		}
+	}
+	m.mu.Unlock()
 
-			// Notify about change (in goroutine to avoid deadlock)
-			if m.onChange != nil {
-				go m.onChange(configKey)
-			}
+	// 4. Callbacks ausserhalb des Locks. Synchron ist hier richtig: refreshAll
+	// laeuft bereits in der Ticker-Goroutine, und ein Ticker verwirft Ticks,
+	// solange der Empfaenger beschaeftigt ist - Ueberlappungen kann es also
+	// nicht geben.
+	if m.onChange != nil {
+		for _, key := range changed {
+			m.onChange(key)
 		}
 	}
 }
