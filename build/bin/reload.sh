@@ -9,11 +9,18 @@ do
  do
   :
  done
- caddy validate --config /etc/caddy/Caddyfile
- if [ $? -eq 0 ]
+ # validate prueft die GESAMTE Konfiguration. Schlaegt sie fehl, wird nichts
+ # geladen - auch keine unbeteiligte Site. Eine einzelne fehlerhafte Datei
+ # blockiert also alle weiteren Aenderungen, bis sie korrigiert ist. Deshalb
+ # muss der Fehler sichtbar sein: frueher lief der Zweig stillschweigend leer,
+ # und der Reload blieb ohne jeden Logeintrag aus.
+ if caddy validate --config /etc/caddy/Caddyfile
  then
   echo "Detected Caddy Configuration Change"
   echo "Executing: caddy reload --config /etc/caddy/Caddyfile"
   caddy reload --config /etc/caddy/Caddyfile
+ else
+  echo "ERROR: Caddy configuration is invalid - NOT reloading." >&2
+  echo "ERROR: All config changes stay inactive until this is fixed." >&2
  fi
 done
