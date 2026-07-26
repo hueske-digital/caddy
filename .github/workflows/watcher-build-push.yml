@@ -2,11 +2,16 @@ name: Build and Push Watcher image
 
 env:
   IMAGE_NAME: ghcr.io/hueske-digital/caddy
+  # Nur main veroeffentlicht das Image, das die Systeme ziehen. Jeder andere
+  # Ref - typischerweise ueber workflow_dispatch auf einem Branch - landet auf
+  # einem Beta-Tag und laesst den produktiven unangetastet.
+  IMAGE_TAG: ${{ github.ref_name == 'main' && 'watcher' || 'watcher-beta' }}
 
 on:
   push:
     branches:
       - main
+      - beta
     paths:
       - 'watcher/**'
       - '.github/workflows/watcher-build-push.yml'
@@ -97,7 +102,7 @@ jobs:
         with:
           push: true
           context: ./watcher
-          tags: ${{ env.IMAGE_NAME }}:watcher-${{ steps.platform.outputs.suffix }}
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ steps.platform.outputs.suffix }}
           platforms: ${{ matrix.platform }}
           provenance: false
 
@@ -118,7 +123,7 @@ jobs:
 
       - name: Create and push manifest
         run: |
-          docker manifest create ${{ env.IMAGE_NAME }}:watcher \
-            ${{ env.IMAGE_NAME }}:watcher-amd64 \
-            ${{ env.IMAGE_NAME }}:watcher-arm64
-          docker manifest push ${{ env.IMAGE_NAME }}:watcher
+          docker manifest create ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64 \
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
+          docker manifest push ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
