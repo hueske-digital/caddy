@@ -737,18 +737,29 @@ func TestSSOCookieStripScope(t *testing.T) {
 		}
 	})
 
-	t.Run("mehrstufiger Host laesst den Scope offen", func(t *testing.T) {
+	t.Run("mehrstufiger Host landet trotzdem auf der registrierbaren Domain", func(t *testing.T) {
 		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
-		// Bei auth.sub.hueske.digital ist nicht entscheidbar, ob der Cookie auf
-		// .sub.hueske.digital oder .hueske.digital liegt. Eine Ableitung auf
-		// sub.hueske.digital waere zu eng - dann bliebe das Cookie auf
-		// kunde.hueske.digital stehen. Also lieber ueberall strippen.
+		// Das Cookie liegt auf .hueske.digital, egal wie tief TINYAUTH_DOMAIN
+		// selbst sitzt - also darf der Scope nicht auf sub.hueske.digital
+		// verengt werden.
 		t.Setenv("TINYAUTH_DOMAIN", "auth.sub.hueske.digital")
 
-		for _, d := range []string{"kunde.hueske.digital", "heimatverein-leteln.de"} {
-			if ssoCookieStripDirective(site(d)) == "" {
-				t.Errorf("%s: bei unklarem Scope muss gestrippt werden", d)
-			}
+		if ssoCookieStripDirective(site("kunde.hueske.digital")) == "" {
+			t.Error("Site im Cookie-Scope wurde nicht gestrippt")
+		}
+		if got := ssoCookieStripDirective(site("heimatverein-leteln.de")); got != "" {
+			t.Errorf("fremde Domain unerwartet gestrippt: %s", got)
+		}
+	})
+
+	t.Run("mehrteiliges TLD faellt zu weit aus, nicht zu eng", func(t *testing.T) {
+		t.Setenv("COMPOSE_PROJECT_NAME", "caddy")
+		t.Setenv("TINYAUTH_DOMAIN", "auth.example.co.uk")
+
+		// Scope wird co.uk - zu weit, aber harmlos. Entscheidend ist, dass die
+		// tatsaechlich betroffene Site gestrippt wird.
+		if ssoCookieStripDirective(site("kunde.example.co.uk")) == "" {
+			t.Error("Site im echten Cookie-Scope wurde nicht gestrippt")
 		}
 	})
 

@@ -187,36 +187,31 @@ func ssoCookieStripDirective(cfg *CaddyConfig) string {
 // tinyauthCookieDomain liefert den Geltungsbereich von TinyAuths Cookies, ohne
 // fuehrenden Punkt. Leer bedeutet "unbekannt" - dann wird ueberall gestrippt.
 //
-// TinyAuth scopet auf die Parent-Domain seines eigenen Hosts, damit SSO ueber
-// Subdomains funktioniert: auth.example.com -> Domain=.example.com.
+// TinyAuth setzt seine Cookies auf die registrierbare Domain, damit SSO ueber
+// alle Subdomains funktioniert: Domain=.example.com, unabhaengig davon, wie tief
+// TINYAUTH_DOMAIN selbst liegt. Genommen werden deshalb die letzten zwei Labels.
 //
-// Die Ableitung darf nur in eine Richtung irren. Zu WEIT gefasst heisst
-// ueberfluessig strippen - unschaedlich. Zu ENG hiesse, eine Kredential auf
-// einer Site stehen zu lassen, die sie erhaelt. Deshalb wird nur abgeleitet, wo
-// es eindeutig ist:
+//	auth.example.com      -> example.com
+//	auth.sub.example.com  -> example.com
+//	example.com           -> example.com
 //
-//	auth.example.com  (3 Labels)  -> example.com
-//	example.com       (2 Labels)  -> example.com
-//	auth.sub.example.com          -> unklar, Scope offen lassen
-//
-// Bei vier oder mehr Labels ist nicht entscheidbar, ob der Cookie auf
-// .sub.example.com oder .example.com liegt - und bei mehrteiligen TLDs
-// (example.co.uk) waere ein weiteres Weglassen erst recht falsch. In diesen
-// Faellen bleibt es beim Strippen auf allen Sites.
+// Bei mehrteiligen TLDs (auth.example.co.uk) ergibt das co.uk und damit einen zu
+// WEITEN Scope. Das ist die unschaedliche Richtung: zu weit heisst ueberfluessig
+// strippen. Zu eng waere gefaehrlich - dann bliebe eine Kredential auf einer
+// Site stehen, die sie erhaelt. Breiter als die registrierbare Domain kann ein
+// Cookie nicht liegen, Browser lehnen Public Suffixes ab; die Ableitung kann
+// also nie zu eng ausfallen.
 func tinyauthCookieDomain() string {
 	host := strings.ToLower(strings.TrimSpace(os.Getenv("TINYAUTH_DOMAIN")))
 	if host == "" {
 		return ""
 	}
 
-	switch labels := strings.Split(host, "."); len(labels) {
-	case 2:
+	labels := strings.Split(host, ".")
+	if len(labels) <= 2 {
 		return host
-	case 3:
-		return strings.Join(labels[1:], ".")
-	default:
-		return ""
 	}
+	return strings.Join(labels[len(labels)-2:], ".")
 }
 
 // inTinyauthCookieScope prueft, ob eine Site das TinyAuth-Cookie ueberhaupt
