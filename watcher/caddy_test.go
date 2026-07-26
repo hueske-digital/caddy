@@ -777,9 +777,10 @@ func TestWriteConfig_AllowlistWithAuthURL(t *testing.T) {
 		t.Error("expected custom auth URL in forward_auth")
 	}
 
-	// External HTTPS auth needs header_up Host
-	if !strings.Contains(contentStr, "header_up Host {http.reverse_proxy.upstream.hostport}") {
-		t.Error("expected header_up Host for external HTTPS auth")
+	// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
+	// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
+	if strings.Contains(contentStr, "header_up Host") {
+		t.Error("unexpected redundant header_up Host")
 	}
 
 	// Should be inside handle block
@@ -1374,8 +1375,10 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth https://login.example.com") {
 			t.Error("expected custom auth URL")
 		}
-		if !strings.Contains(result, "header_up Host {http.reverse_proxy.upstream.hostport}") {
-			t.Error("expected header_up Host for external HTTPS auth")
+		// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
+		// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
+		if strings.Contains(result, "header_up Host") {
+			t.Error("unexpected redundant header_up Host")
 		}
 		if strings.Contains(result, "tinyauth") {
 			t.Error("unexpected tinyauth reference with custom URL")
@@ -1392,8 +1395,10 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
 			t.Error("expected custom auth URL with path matcher")
 		}
-		if !strings.Contains(result, "header_up Host") {
-			t.Error("expected header_up Host for external HTTPS auth")
+		// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
+		// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
+		if strings.Contains(result, "header_up Host") {
+			t.Error("unexpected redundant header_up Host")
 		}
 	})
 
@@ -1430,8 +1435,10 @@ func TestGenerateAuthBlock(t *testing.T) {
 		if !strings.Contains(result, "forward_auth @auth-paths https://login.example.com") {
 			t.Error("expected custom auth URL with except matcher")
 		}
-		if !strings.Contains(result, "header_up Host") {
-			t.Error("expected header_up Host for external HTTPS auth")
+		// Kein header_up Host: Caddy uebergibt bei TLS-Upstreams ohnehin die
+		// Upstream-Adresse als Host und warnt sonst bei jedem Reload.
+		if strings.Contains(result, "header_up Host") {
+			t.Error("unexpected redundant header_up Host")
 		}
 	})
 

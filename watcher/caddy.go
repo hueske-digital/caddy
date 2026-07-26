@@ -537,15 +537,15 @@ https://www.%s {%s
 // If groups is set, only allow users with matching groups (returns 403 otherwise)
 func generateAuthBlock(authURL string, paths []string, except []string, groups []string) string {
 	// Determine auth server
+	//
+	// Frueher wurde bei https-Auth-Servern ein "header_up Host
+	// {http.reverse_proxy.upstream.hostport}" gesetzt. Das ist wirkungslos:
+	// Caddy uebergibt bei TLS-Upstreams ohnehin die Upstream-Adresse als Host
+	// und warnt bei jedem Reload ausdruecklich darueber. Live gegengeprueft -
+	// mit und ohne die Zeile sieht das Backend denselben Host.
 	authServer := "{env.COMPOSE_PROJECT_NAME}-tinyauth-1:3000"
-	headerUp := ""
-
 	if authURL != "" {
 		authServer = authURL
-		// External HTTPS auth servers need correct Host header
-		if strings.HasPrefix(authURL, "https://") {
-			headerUp = "\n        header_up Host {http.reverse_proxy.upstream.hostport}"
-		}
 	}
 
 	// Generate group restriction block if groups are specified
@@ -571,8 +571,8 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	if len(paths) == 0 && len(except) == 0 {
 		result := fmt.Sprintf(`    forward_auth %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups%s
-    }`, authServer, headerUp)
+        copy_headers Remote-User Remote-Email Remote-Groups
+    }`, authServer)
 		if len(groups) > 0 {
 			// No path restriction for groups check
 			groupsBlockFull := fmt.Sprintf(groupsBlock, "")
@@ -587,8 +587,8 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 		result := fmt.Sprintf(`    @auth-paths not path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups%s
-    }`, exceptList, authServer, headerUp)
+        copy_headers Remote-User Remote-Email Remote-Groups
+    }`, exceptList, authServer)
 		if len(groups) > 0 {
 			// Add path restriction to groups check
 			pathCondition := fmt.Sprintf("\n        not path %s", exceptList)
@@ -603,8 +603,8 @@ func generateAuthBlock(authURL string, paths []string, except []string, groups [
 	result := fmt.Sprintf(`    @auth-paths path %s
     forward_auth @auth-paths %s {
         uri /api/auth/caddy
-        copy_headers Remote-User Remote-Email Remote-Groups%s
-    }`, pathList, authServer, headerUp)
+        copy_headers Remote-User Remote-Email Remote-Groups
+    }`, pathList, authServer)
 	if len(groups) > 0 {
 		// Add path restriction to groups check
 		pathCondition := fmt.Sprintf("\n        path %s", pathList)
