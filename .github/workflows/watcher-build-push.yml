@@ -31,9 +31,29 @@ jobs:
           go-version: '1.26'
           cache-dependency-path: watcher/go.sum
 
+      - name: Check formatting
+        working-directory: ./watcher
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Not gofmt'ed:"; echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: ./watcher
+        run: go vet ./...
+
       - name: Run unit tests
         working-directory: ./watcher
-        run: go test -v ./...
+        run: go test -race -v ./...
+
+      - name: Check for known vulnerabilities
+        working-directory: ./watcher
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
   build:
     needs: test
