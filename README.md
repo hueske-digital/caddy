@@ -116,7 +116,7 @@ All standard `CADDY_*` variables support the `_servicename` suffix. Each service
 | Type | Access |
 |------|--------|
 | `external` | Public (or restricted via allowlist) |
-| `internal` | Private IP ranges only (10.x, 172.16-31.x, 192.168.x) |
+| `internal` | Private IP ranges and the Tailscale tailnet only (10.x, 172.16-31.x, 192.168.x, 100.64.0.0/10, fd7a:115c:a1e0::/48) |
 | `cloudflare` | Cloudflare IP ranges only |
 
 ### Allowlist
@@ -166,7 +166,7 @@ This generates configs in `hosts/external/` that obtain wildcard certs via DNS c
 Available snippets (defined in `hosts/base.conf`):
 
 **IP Matchers:**
-- `(internal)` - private IP ranges (10.x, 172.16-31.x, 192.168.x)
+- `(internal)` - private IP ranges (10.x, 172.16-31.x, 192.168.x) and the Tailscale tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48)
 - `(cloudflare)` - Cloudflare proxy IPs
 
 **TLS snippets** (set via `CADDY_DNS_PROVIDER`):
